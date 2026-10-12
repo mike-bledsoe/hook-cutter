@@ -1,0 +1,10 @@
+# hook-cutter core runtime (installed into the skill venv by: hc doctor --install)
+# Pinned exactly. numpy 2.5 needs Python 3.12 or newer.
+numpy==2.5.3
+pillow==12.3.0
+opencv-python-headless==5.0.0.93
+faster-whisper==1.2.1
+# Imported directly (model lookup and download). faster-whisper only asks for >=0.21, so
+# without this line a new install takes whatever major version is newest that day.
+huggingface-hub==1.33.0
+fonttools==4.66.1

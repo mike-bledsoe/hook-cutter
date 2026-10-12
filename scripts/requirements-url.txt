@@ -1,0 +1,4 @@
+# Optional URL ingest (hc doctor --install --with url).
+# A floor, not a pin: yt-dlp must track site changes. The [default] extra pulls
+# yt-dlp-ejs, which YouTube downloads need together with a JS runtime (deno or node).
+yt-dlp[default]>=2025.1.1

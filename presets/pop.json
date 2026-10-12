@@ -1,0 +1,17 @@
+{
+  "name": "pop",
+  "label": "Pop",
+  "extends": "clean",
+  "description": "Words build onto the screen as they are spoken, three at a time, with a short rise; emphasis words pop slightly larger in a hot coral accent. Bolder and busier than clean.",
+  "caption": {
+    "font": "Montserrat[wght].ttf:Black",
+    "size": 80,
+    "accent": "#FF5A36",
+    "emphasis": {"sources": ["hook", "manual", "auto"], "per_page": 1, "font": null, "size_mult": 1.15},
+    "reveal": "build",
+    "anim": {"in_ms": 110, "rise_px": 10, "pop": true},
+    "layout": {"max_words": 3, "max_lines": 2}
+  },
+  "hook_card": {"font": "Montserrat[wght].ttf:Black", "accent": "#FF5A36"},
+  "cover": {"headline_font": "Anton-Regular.ttf", "accent": "#FF5A36"}
+}

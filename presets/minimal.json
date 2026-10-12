@@ -1,0 +1,20 @@
+{
+  "name": "minimal",
+  "label": "Minimal",
+  "extends": "clean",
+  "description": "Quiet sentence-case phrases in a medium-weight sans on a soft dark pill, shown whole with no word animation or accent colour. Reads like well-made subtitles.",
+  "caption": {
+    "font": "Montserrat[wght].ttf:SemiBold",
+    "size": 60,
+    "case": "as_is",
+    "accent": "#FFFFFF",
+    "reveal": "static",
+    "backing": {"mode": "always"},
+    "layout": {"max_words": 6, "max_chars": 24, "line_gap": 1.12}
+  },
+  "hook_card": {"font": "Montserrat[wght].ttf:Bold", "max_size": 84, "min_size": 48, "case": "as_is",
+                "accent": "#FFFFFF", "line_gap": 1.1, "backing": {"mode": "always"}},
+  "landscape": {"caption": {"size": 46}},
+  "motion": {"punch_in": 1.0},
+  "cover": {"headline_font": "Montserrat[wght].ttf:Bold", "accent": "#FFFFFF"}
+}

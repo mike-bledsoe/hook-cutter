@@ -1,0 +1,5 @@
+{
+  "organic": {"top": 240, "bottom": 420, "left": 90, "right": 150},
+  "ads": {"top": 270, "bottom": 672, "left": 65, "right": 242},
+  "landscape": {"top": 54, "bottom": 54, "left": 96, "right": 96}
+}

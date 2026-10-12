@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""hook-cutter launcher.
+
+Runs under any python3 >= 3.9 (stdlib only). When this interpreter is not the
+skill's venv, it re-execs ``<venv>/bin/python -s -m hookcutter.cli <args>`` with
+user site-packages disabled and HF caches pointed into the data dir. Without a
+venv only ``doctor`` (and --help/--version) run, so ``doctor --install`` can
+bootstrap one.
+
+Nothing is written into the skill folder: bytecode caches go to <data dir>/cache/pyc
+(PYTHONPYCACHEPREFIX), and child processes get PYTHONUTF8=1 so any transcript text prints.
+
+The venv interpreter and everything it starts (``-m yt_dlp``, ``-m pip``) run with
+PYTHONSAFEPATH=1, so a ``hookcutter/``, ``random.py`` or ``yt_dlp/`` in the folder hc is
+started from is never imported in place of the real module. The variable is used, not the
+``-P`` flag: an interpreter older than 3.11 ignores the variable but would refuse the flag.
+"""
+
+import os
+import shlex
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+sys.dont_write_bytecode = True   # the bootstrap import below must not create __pycache__ here
+from hookcutter import env  # noqa: E402  (stdlib-only module)
+
+BOOTSTRAP_OK = ("doctor", "-h", "--help", "--version")
+
+
+def _command(argv):
+    for a in argv:
+        if not a.startswith("-"):
+            return a
+    for a in argv:
+        if a in ("-h", "--help", "--version"):
+            return a
+    return None
+
+
+def _pyc_dir():
+    return str(env.cache_dir() / "pyc")
+
+
+def _child_env():
+    e = dict(os.environ)
+    e["PYTHONNOUSERSITE"] = "1"
+    e["PYTHONPATH"] = HERE
+    e["PYTHONUTF8"] = "1"
+    e["PYTHONSAFEPATH"] = "1"     # never import from the folder hc was started in
+    e["PYTHONPYCACHEPREFIX"] = _pyc_dir()
+    e["HF_HOME"] = str(env.hf_home())
+    e.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    return e
+
+
+def _run_here(argv):
+    # Same rules in-process: caches under the data dir, never next to the sources.
+    sys.pycache_prefix = _pyc_dir()
+    sys.dont_write_bytecode = False
+    os.environ["PYTHONSAFEPATH"] = "1"    # inherited by `-m yt_dlp`, `-m pip` and the test runner
+    env.setup_runtime_env()
+    from hookcutter import cli
+    return cli.main(argv)
+
+
+def main():
+    argv = sys.argv[1:]
+    if env.in_venv():
+        return _run_here(argv)
+    vpy = env.venv_python()
+    if vpy.exists():
+        cmd = [str(vpy), "-s", "-m", "hookcutter.cli"] + argv
+        if sys.platform.startswith("win"):
+            try:
+                return subprocess.call(cmd, env=_child_env())
+            except KeyboardInterrupt:
+                return 130
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execve(str(vpy), cmd, _child_env())
+    cmd = _command(argv)
+    if cmd in BOOTSTRAP_OK or cmd is None:
+        return _run_here(argv)
+    sys.stderr.write("hook-cutter is not set up. Run: python3 %s doctor --install\n"
+                     % shlex.quote(os.path.join(HERE, "hc")))
+    return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,2 @@
+# Optional Apple Silicon ASR backend (hc doctor --install --with mlx)
+mlx-whisper==0.4.3

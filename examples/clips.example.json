@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "defaults": {
+    "styles": ["clean"],
+    "formats": ["vertical"],
+    "tighten": {"enabled": true, "gap": 0.6, "keep": 0.3, "min_cut": 0.12, "fillers": true},
+    "safezone": "organic",
+    "length": {"vertical": [15, 30, 60, 90], "landscape": [60, 300, 900, 1800]}
+  },
+  "_speakers": "Face x per speaker label, read off the shots sheet. In a two-shot or gallery, framing follows whoever is talking.",
+  "speakers": {"Speaker A": {"x": 0.27}, "Speaker B": {"x": 0.62}},
+  "clips": {
+    "c01-fired-biggest-client": {
+      "_note": "Cold open: the claim lives 18 s into the passage, so it plays first, then the why, then the close.",
+      "ledger": "M03",
+      "title": "Why I fired my biggest client",
+      "speaker": "Speaker B",
+      "kind": "cut",
+      "pieces": [
+        {"words": [5202, 5206], "role": "cold_open", "expect": ["I fired my", "biggest client"]},
+        {"words": [5131, 5180], "role": "setup", "expect": ["Half of everything we", "came from them"]},
+        {"words": [5213, 5244], "role": "close", "hold_after": 0.6, "expect": ["The month after", "best month ever"]}
+      ],
+      "omit": [5150, 5151, 5152],
+      "verbatim": [[5236, 5244]],
+      "fix": {"5165": "invoices"},
+      "emphasis": [],
+      "hook_card": {"lines": ["I FIRED MY", "*BIGGEST* CLIENT"], "dur": "auto"},
+      "captions": true,
+      "caption_y": null,
+      "framing": [
+        {"at_src": "34:02.0", "mode": "track", "x": 0.62, "crop": 1.0},
+        {"at_src": "34:20.5", "mode": "letterbox"},
+        {"at_src": "34:24.0", "mode": "track", "x": 0.62, "crop": 0.9}
+      ],
+      "motion": null,
+      "cover": {"headline": "HALF OUR REVENUE, AND I *LET IT GO*", "at_out": 3.2, "shift": 80, "lockup": null},
+      "post": {
+        "title": "She fired the client paying half her bills. Then came her best month.",
+        "caption": "One client was half the business. Here is why she let them go, and what the next month looked like."
+      }
+    },
+    "c02-one-channel": {
+      "_note": "Simple: one chronological piece whose first line is already the strongest.",
+      "ledger": "M09",
+      "title": "One channel is not a business",
+      "speaker": "Speaker A",
+      "pieces": [
+        {"words": [1204, 1288], "expect": ["If every lead comes", "do not own a business"]}
+      ],
+      "hook_card": {"lines": ["ONE CHANNEL IS NOT", "A *BUSINESS*"], "dur": "auto"}
+    }
+  }
+}
