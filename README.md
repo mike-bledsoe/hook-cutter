@@ -273,6 +273,11 @@ post or schedule anything.
 
 ## Credits
 
+Several of hook-cutter's ideas came from panel-to-reels by
+[Summit Oak AI](https://summitoakai.com): cuts addressed by word index, build-up captions drawn
+with Pillow with a pill behind them on bright backgrounds, and a shortlist the user approves
+before anything is cut. Each was rebuilt here; none of its code is included.
+
 Whisper (OpenAI), faster-whisper (SYSTRAN) and CTranslate2 (OpenNMT), mlx-whisper (Apple
 ml-explore), the YuNet face detector (Shiqi Yu, via the OpenCV Zoo), OpenCV, Pillow, NumPy,
 fontTools, yt-dlp and FFmpeg. Fonts: Archivo Black, Anton and Montserrat, under the SIL Open Font

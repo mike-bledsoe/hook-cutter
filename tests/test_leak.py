@@ -36,7 +36,7 @@ DENY_DIGESTS = frozenset({
     "5b02b05f3b5c1d4f", "3436c7f8faa7a9a3", "7070f880c1e21321", "81881c51ce73c46e",
     "4c914002d175fe66", "a13202cdec01197b", "aeff1bb2c564e76c", "3512d2e0a0534fbe",
     "4c0ecf50cf8c11a2", "a669d44c7b26d9d2", "e7058633d1f40866", "5e5fd497eedf748a", "a05b219e6fcab5fd", "88fa550d34cfe409",
-    "4cee72ec1081d466", "e3e5b7519128e42f", "ea7b3fe7887cc560", "dc737ffaadf92f5b",
+    "4cee72ec1081d466", "ea7b3fe7887cc560", "dc737ffaadf92f5b",
     "7a980314d5f610a4", "bdc5a5a5ed4c411e", "97b7950d1882a303", "c00c0846b113f4ce",
     "a0e7bde5e1a9a216", "eac1af1ad0b86187", "d9fb7a38780af03f", "51a355690c4f67ec",
     "1f83fdcd5d55e57e", "03742b792390f6cd", "19a6f20a291634da", "0570ed9b22c225f0",
