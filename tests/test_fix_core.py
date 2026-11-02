@@ -838,6 +838,73 @@ class TempFolderTests(unittest.TestCase):
         self.assertTrue(base.exists())
 
 
+class SyncedFolderTests(unittest.TestCase):
+    """A project in a folder a sync service uploads is warned about; a local one is not."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix="home-", dir=str(TMP)))
+        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home), "OneDrive": "",
+                                                "OneDriveConsumer": "", "OneDriveCommercial": ""})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def _finder(self, **prefs):
+        import plistlib
+        d = self.home / "Library" / "Preferences"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(str(d / "com.apple.finder.plist"), "wb") as fh:
+            plistlib.dump(prefs, fh)
+
+    def test_sync_client_folders(self):
+        self.assertEqual(Project(self.home / "Dropbox" / "p").synced(), "Dropbox")
+        self.assertEqual(Project(self.home / "Library" / "Mobile Documents" / "x" / "p").synced(),
+                         "iCloud Drive")
+        self.assertEqual(Project(self.home / "Library" / "CloudStorage" / "GoogleDrive-a" / "p")
+                         .synced(), "a cloud storage app")
+        self.assertIsNone(Project(self.home / "hook-cutter-projects" / "p").synced())
+        self.assertIsNone(Project(self.home / "Dropboxed" / "p").synced())
+
+    @unittest.skipUnless(sys.platform == "darwin", "iCloud Desktop & Documents is macOS only")
+    def test_icloud_desktop_and_documents(self):
+        self.assertIsNone(Project(self.home / "Documents" / "p").synced())
+        self._finder(FXICloudDriveDocuments=True, FXICloudDriveDesktop=False)
+        self.assertEqual(Project(self.home / "Documents" / "p").synced(), "iCloud Drive")
+        self.assertIsNone(Project(self.home / "Desktop" / "p").synced())
+
+    def test_unreadable_finder_prefs_mean_unknown(self):
+        d = self.home / "Library" / "Preferences"
+        d.mkdir(parents=True)
+        (d / "com.apple.finder.plist").write_bytes(b"not a plist")
+        self.assertIsNone(Project(self.home / "Documents" / "p").synced())
+
+    def test_projects_dir_default_and_override(self):
+        with mock.patch.dict(os.environ, {"HOOKCUTTER_PROJECTS": ""}):
+            self.assertEqual(env.projects_dir(), self.home / "hook-cutter-projects")
+        with mock.patch.dict(os.environ, {"HOOKCUTTER_PROJECTS": "~/clips"}):
+            self.assertEqual(env.projects_dir(), self.home / "clips")
+
+    def test_doctor_warns_on_a_synced_projects_dir(self):
+        with mock.patch.dict(os.environ, {"HOOKCUTTER_PROJECTS": str(self.home / "Dropbox" / "hc")}):
+            (c,) = doctor.check_projects_dir()
+        self.assertEqual((c.name, c.status), ("projects", doctor.WARN))
+        with mock.patch.dict(os.environ, {"HOOKCUTTER_PROJECTS": ""}):
+            (c,) = doctor.check_projects_dir()
+        self.assertEqual(c.status, doctor.PASS)
+
+    def test_ingest_warns_in_a_synced_folder(self):
+        src = self.home / "in.mp4"
+        src.write_bytes(b"x")
+        P = self.home / "Dropbox" / "p"
+        err = io.StringIO()
+        with redirect_stderr(err), mock.patch.object(ingest, "_ingest_locked", return_value={}):
+            ingest.ingest(str(P), str(src))
+        self.assertIn("synced by Dropbox", err.getvalue())
+        err = io.StringIO()
+        with redirect_stderr(err), mock.patch.object(ingest, "_ingest_locked", return_value={}):
+            ingest.ingest(str(self.home / "local" / "p"), str(src))
+        self.assertNotIn("synced by", err.getvalue())
+
+
 class ProbeWarningTests(unittest.TestCase):
 
     def _src(self, **video):

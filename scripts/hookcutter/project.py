@@ -66,6 +66,58 @@ def temp_roots() -> List[str]:
     return out
 
 
+# Folders under home that a sync client uploads, wherever they exist (path, service).
+SYNCED_HOME_DIRS = (
+    ("Library/Mobile Documents", "iCloud Drive"),
+    ("Library/CloudStorage", "a cloud storage app"),
+    ("iCloudDrive", "iCloud Drive"),
+    ("Dropbox", "Dropbox"),
+    ("Google Drive", "Google Drive"),
+    ("OneDrive", "OneDrive"),
+)
+# macOS Finder settings that are 1 when iCloud "Desktop & Documents Folders" syncs that folder.
+ICLOUD_DESKTOP_DOCUMENTS = (("FXICloudDriveDesktop", "Desktop"), ("FXICloudDriveDocuments", "Documents"))
+
+
+def _icloud_desktop_documents(home: Path) -> List[str]:
+    """~/Desktop and ~/Documents when iCloud syncs them (read from the Finder preferences file,
+    which needs no folder permission). Empty when unknown."""
+    if sys.platform != "darwin":
+        return []
+    import plistlib
+    try:
+        with open(str(home / "Library" / "Preferences" / "com.apple.finder.plist"), "rb") as fh:
+            prefs = plistlib.load(fh)
+    except Exception:
+        return []
+    return [str(home / name) for key, name in ICLOUD_DESKTOP_DOCUMENTS if prefs.get(key) in (1, True)]
+
+
+def synced_roots() -> List[tuple]:
+    """(normalized folder prefix, service) for the folders a sync client uploads on this machine."""
+    home = Path.home()
+    cands = [(str(home / rel), name) for rel, name in SYNCED_HOME_DIRS]
+    cands += [(p, "iCloud Drive") for p in _icloud_desktop_documents(home)]
+    for var in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        if os.environ.get(var):
+            cands.append((os.environ[var], "OneDrive"))
+    out = []
+    for path, name in cands:
+        n = _norm_dir(path)
+        if len(n) > 1 and n not in [o for o, _ in out]:
+            out.append((n, name))
+    return out
+
+
+def synced_service(path: Any) -> Optional[str]:
+    """The sync service that uploads ``path`` ("iCloud Drive", "Dropbox", ...), or None."""
+    mine = _norm_dir(path)
+    for prefix, name in synced_roots():
+        if mine.startswith(prefix):
+            return name
+    return None
+
+
 def _ext(ext: str) -> str:
     ext = str(ext)
     return ext if ext.startswith(".") else "." + ext
@@ -102,6 +154,11 @@ class Project(object):
         system temp dir (macOS $TMPDIR under /var/folders, Windows %TEMP%) or TMPDIR/TEMP/TMP."""
         mine = _norm_dir(self.root)
         return any(mine.startswith(t) for t in temp_roots())
+
+    def synced(self) -> Optional[str]:
+        """The sync service that uploads P (iCloud Desktop & Documents, Dropbox, ...), or None.
+        A project holds GBs of source, segments and renders: keep P local, copy export/ out."""
+        return synced_service(self.root)
 
     def _file(self, *parts: str) -> Path:
         p = self.root.joinpath(*parts)

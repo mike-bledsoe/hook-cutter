@@ -175,11 +175,15 @@ What happens next:
 Give notes in plain words ("open stronger", "the laugh got cut") and it re-renders only what
 changed.
 
-Everything for a recording lives in the project folder you named, so pick a lasting one, not a
-temporary folder. The finished files are in its `export/` subfolder. Posting them is up to you:
-the skill never uploads or publishes. No run time is promised: the one production run took
-about two and a half hours for eleven clips with several agents working at once, and a single
-session like the one above has not been timed.
+Everything for a recording lives in the project folder you named, so pick a lasting, local
+one: not a temporary folder, and not one a sync service uploads (iCloud Desktop & Documents,
+Dropbox, OneDrive, Google Drive), since a project holds gigabytes of source, segments and
+renders that change on every pass. If you name none, Claude uses a folder under
+`~/hook-cutter-projects` (set `HOOKCUTTER_PROJECTS` to change it; `hc doctor` shows the one
+in force). The finished files are in its `export/` subfolder: copy that to wherever you keep
+finished work. Posting them is up to you: the skill never uploads or publishes. No run time
+is promised: the one production run took about two and a half hours for eleven clips with
+several agents working at once, and a single session like the one above has not been timed.
 
 ## Known issues
 
