@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `hc ingest` warns when the project folder is one a sync service uploads (iCloud Desktop &
+  Documents, iCloud Drive, Dropbox, OneDrive, Google Drive, other cloud storage apps): a
+  project holds gigabytes of source, segments and renders that change on every pass.
+- `hc doctor` shows the default home for project folders, `~/hook-cutter-projects` or
+  `$HOOKCUTTER_PROJECTS`, and warns when that folder is synced.
+- SKILL.md hard rule 10: `P` is local as well as durable, defaults to a folder under that
+  home, and a parallel agent's working copy of `P` never goes in a synced or scratch folder.
+  The version is unchanged, so 0.2.0 projects stay current; QA reruns once, because its code
+  digest covers every module.
+
 ## 0.2.0
 
 Aimed at a new user's first hour, and at the defects the first production run reported most.

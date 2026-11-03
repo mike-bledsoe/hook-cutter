@@ -120,6 +120,16 @@ def cache_dir() -> Path:
     return data_dir() / "cache"
 
 
+def projects_dir() -> Path:
+    """Suggested home for project folders: $HOOKCUTTER_PROJECTS, else ~/hook-cutter-projects.
+    A local folder on purpose: a project holds GBs of source, segments and renders, which a
+    synced folder (iCloud Desktop & Documents, Dropbox, ...) would upload on every change."""
+    override = os.environ.get("HOOKCUTTER_PROJECTS")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "hook-cutter-projects"
+
+
 def bundled_fonts_dir() -> Path:
     return SKILL_ROOT / "fonts"
 

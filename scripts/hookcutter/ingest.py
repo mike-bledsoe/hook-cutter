@@ -421,6 +421,11 @@ def ingest(project: Any, source: str, *, copy: bool = False, section: Optional[s
     if proj.is_temp():
         env.log("ingest", "warning: %s is a temporary folder; projects should live somewhere durable"
                 % proj.root)
+    service = proj.synced()
+    if service:
+        env.log("ingest", "warning: %s is synced by %s, which uploads every source, segment and "
+                "render (GBs per project); keep projects in a local folder such as %s and copy "
+                "export/ to the synced folder when it is done" % (proj.root, service, env.projects_dir()))
     from . import fsutil
     # one ingest per project at a time: a second run waits, then sees what the first one did
     with fsutil.file_lock(proj.cache_path("ingest.lock"), what="ingest into %s" % proj.root):

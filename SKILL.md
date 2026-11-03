@@ -28,7 +28,8 @@ a 1080x1920 cover with grid and mobile previews, a QA report, and a named export
 8. **Fix the spec, never the output.** Never hand-edit renders or QA files; never loosen a gate.
 9. **Ask about rights first:** does the user have rights to this footage, and whose brand does it
    carry? Never apply another organisation's branding.
-10. **The project folder `P` is durable** (never /tmp). Everything for a source lives inside it.
+10. **The project folder `P` is durable and local**: never /tmp or a synced folder (iCloud,
+    Dropbox). Default `<projects>/<slug>` (`hc doctor` prints it); copy `P/export/` out.
 11. **Images cost context; old ones drop out.** Open at most two at a time, write each up in a
     notes file at once, never re-open one written up (`qa.md`, "Image budget").
 
@@ -54,9 +55,8 @@ expected on its drawn speaker).
 
 ## Workflow
 
-Start with one message to the user covering: the source, the project folder, who the clips
-serve, rights and branding, anything already posted from this source, and (only if they care)
-count, formats and style. Then:
+Start with one message on: the source, the project folder (rule 10), who the clips serve, rights
+and branding, what is already posted from it, and (if they care) count, formats and style. Then:
 
 ### 1. Ingest
 

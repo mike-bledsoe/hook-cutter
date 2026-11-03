@@ -255,6 +255,17 @@ def check_data_dir() -> List[Check]:
     return [Check("data dir", status, detail)]
 
 
+def check_projects_dir() -> List[Check]:
+    """Where project folders go by default; a synced folder there is a WARN (never blocking)."""
+    from .project import synced_service
+    d = env.projects_dir()
+    service = synced_service(d)
+    if service:
+        return [Check("projects", WARN, "%s is synced by %s: every render uploads. Point "
+                      "HOOKCUTTER_PROJECTS at a local folder" % (d, service))]
+    return [Check("projects", PASS, "%s (default home for project folders; HOOKCUTTER_PROJECTS)" % d)]
+
+
 def hc_path() -> str:
     """The launcher path, quoted for a shell (skill folders can hold spaces or quotes)."""
     return shlex.quote(str(env.SCRIPTS_DIR / "hc"))
@@ -506,7 +517,8 @@ def run_checks(extras: Sequence[str] = ()) -> List[Check]:
     checks = []  # type: List[Check]
     checks += check_platform()
     checks += check_data_dir()
-    names = [n for f in _req_files(["mlx", "url"]) for n, _, _ in parse_requirements(f)]
+    checks += check_projects_dir()
+    names =[n for f in _req_files(["mlx", "url"]) for n, _, _ in parse_requirements(f)]
     report = venv_report(names)
     checks += check_venv(report)
     checks += check_packages(report, extras)
