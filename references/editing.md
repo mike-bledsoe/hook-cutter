@@ -12,7 +12,52 @@ where each cut falls.
 2. Find exact first and last words with `hc find P "phrase"` and `hc words P A B`.
 3. Pick a shape (below) and write the pieces, each with `expect` anchors.
 4. `hc plan P CLIP`: read the piece table (source and output times, durations) and every lint.
-5. Render, read the sheets, tighten. Two review passes is normal.
+5. Paper edit (below): the user reads each clip's words, with one improvement pass, before any
+   render.
+6. `hc all` on a pilot of two or three clips for the user's ear, then render the rest; read the
+   sheets, tighten. Two review passes is normal.
+
+## Paper edit
+
+Before the first render, put every clip on paper for the user. Words are free to change; a render
+costs minutes and a listen, and a cut that reads wrong on paper sounds wrong too. Do it on the
+first clean `hc plan`, before `hc shots P <clip>` and framing marks: an approved change moves the
+clip's range, so run `hc shots` again for every clip whose pieces changed. A caption-only clip has
+no pieces and skips this; a job of one to three clips skips the pilot (step 5).
+
+1. **Write it out.** `P/notes/paper-edit/<clip>.md`: the words in play order, read back with
+   `hc words P A B` for each piece, a speaker label on every turn (as in `transcript.md`),
+   omitted words shown in place as `[cut: ...]`, and every source jump on its own line with its
+   size, its direction and what it skips. Head it with the length, the number of joins, the
+   biggest jump and the time the strongest line lands (`hc plan` prints output times).
+
+   ```
+   c01-fired-biggest-client: 34 s, 2 joins, biggest jump -16.8 s, strongest line at 0:00
+   Speaker B:  I fired my biggest client.
+   [JUMP -16.8 s, back: to the setup]
+   Speaker B:  Half of everything we [cut: you know, we] billed came from them.
+   ```
+
+2. **One improvement pass on the words.** Per clip: what already works (it stays), then at most a
+   few changes that would make it better, each with its cost: new seams nobody has heard, seconds
+   gained or lost, what goes. The usual moves: open on the claim (rule 1), cut where the speaker
+   describes instead of says, cut a softener between two strong lines, put back a word that
+   bounds the claim (rule 7) or names the subject (rule 5), let a line run in the order it was
+   said. "Leave as is" is a valid answer and often the right one. If the user has a review method
+   of their own, use it.
+3. **Size the jumps.** A jump of a few seconds reads as a trim. A jump of a minute or more inside
+   one clip can join two thoughts into a claim the speaker never made (SKILL.md hard rule 3,
+   `fidelity.md`). Prefer the version with fewer and smaller jumps, and name every jump over about
+   30 s to the user. On one long interview, jumps of 105 to 129 s were flagged on first listen;
+   jumps of 22 to 68 s were not.
+4. **Stop.** Show the paper edits and each proposed change as a yes or no. Only approved changes
+   go into clips.json; a clip the user drops here or at the pilot goes back to BANKED or PASS
+   `user-cut` in `moments.md`.
+5. **Pilot, then the rest.** Run `hc all P <clip>...` on two or three clips (the riskiest seams
+   first), read their sheets and QA (gates C and D), and stop: the user plays them with
+   `P/export/by-ear.md` open before you render the rest. On the run that added this step, the
+   first batch of 14 renders lost 4 clips and needed 2 re-cuts on first listen, and the clips
+   flagged for cuts or context had the largest source jumps.
 
 ## Shapes
 

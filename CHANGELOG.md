@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Frame grabs (covers and QA) stop decoding once the last selected frame is out (`-frames:v`).
+  Before, every grab decoded its input to the end, so on a 79-minute 4K source QA of one clip
+  near the start ran over an hour; a test grab ran about 30x faster. The frames, their order and
+  their bytes are unchanged. QA reports go stale once (their code digest covers every module);
+  renders stay current.
+- Paper edit before the first render (SKILL.md step 5, `editing.md` "Paper edit"): the user
+  reads each clip's words in play order with every source jump marked and sized, plus one
+  improvement pass, and approves before anything renders; then a pilot of two or three clips
+  for their ear before the rest. On the production run behind it, 4 of the first 14 renders
+  were dropped and 2 re-cut on first listen, and the large source jumps were the ones flagged.
 - `hc ingest` warns when the project folder is one a sync service uploads (iCloud Desktop &
   Documents, iCloud Drive, Dropbox, OneDrive, Google Drive, other cloud storage apps): a
   project holds gigabytes of source, segments and renders that change on every pass.

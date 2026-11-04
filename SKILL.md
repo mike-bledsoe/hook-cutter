@@ -1,6 +1,6 @@
 ---
 name: hook-cutter
-description: Turns long-form video (podcast, interview, talk, panel, webinar, livestream; a local file or a URL) into captioned vertical Shorts, Reels and TikToks, plus optional 16:9 clips. Finds the hooks, recomposes each cut hook-first, burns word-timed captions with a hook card, makes covers and runs a QA pass. Use when the user says "cut reels/shorts/clips from this video/podcast/panel/talk", "find the hooks", "find the best moments", "clip this episode", "make shorts from this recording", "turn this interview into reels", "caption this video", "add captions to my clip", "make reels covers", "give this clip a cold open", "recut this clip" or "make this short tighter", or hands over a long recording and wants short-form out of it. Transcription, framing and rendering run locally; the agent writes the moments ledger and the edit spec, and the user approves the shortlist and the final files. Never uploads or publishes.
+description: Turns long-form video (podcast, interview, talk, panel, webinar, livestream; a local file or a URL) into captioned vertical Shorts, Reels and TikToks, plus optional 16:9 clips. Finds the hooks, recomposes each cut hook-first, burns word-timed captions with a hook card, makes covers and runs a QA pass. Use when the user says "cut reels/shorts/clips from this video/podcast/panel/talk", "find the hooks", "find the best moments", "clip this episode", "make shorts from this recording", "turn this interview into reels", "caption this video", "add captions to my clip", "make reels covers", "give this clip a cold open", "recut this clip" or "make this short tighter", or hands over a long recording and wants short-form out of it. Transcription, framing and rendering run locally; the agent writes the moments ledger and the edit spec, and the user approves the shortlist, each clip's words before it renders, and the final files. Never uploads or publishes.
 ---
 
 # hook-cutter
@@ -46,8 +46,7 @@ hc doctor --install --with mlx     # + faster ASR on Apple Silicon
 hc doctor --model large-v3-turbo   # pre-download the ASR model (about 1.6 GB; --backend picks whose)
 ```
 
-If any command prints `hook-cutter is not set up`, run the install line. Never pip install into
-the venv yourself.
+If any command prints `hook-cutter is not set up`, run the install line, never your own pip.
 
 **A new user:** offer `hc demo` first: one finished Short from a made-up recording in about a
 minute, through the same commands below (needs `say` or espeak-ng; WARNs such as "no face" are
@@ -67,10 +66,9 @@ hc ingest P SOURCE                 # local file (linked; --copy to copy) or URL 
 Read the warnings in `P/source.json` (low resolution, HDR, VFR, missing frames, audio holes, a
 channel far quieter than the other: then mixed to mono) and open `P/sheets/survey.jpg`: how many
 people, black bars or gallery tiles, layout changes. A letterboxed or gallery source gets
-`video.active_area`. Re-ingest a VFR source or one with missing frames with `--cfr` (the
-transcript stays valid). A source replaced after ingest stops every step until it is ingested
-again (`spec.md`, "Source identity"). Tell the user what caps quality before promising sharp
-verticals.
+`video.active_area`. Re-ingest a VFR source or one with missing frames with `--cfr` (the transcript
+stays valid). A source replaced after ingest stops every step until it is ingested again (`spec.md`,
+"Source identity"). Tell the user what caps quality before promising sharp verticals.
 
 ### 2. Transcribe
 
@@ -138,8 +136,11 @@ hc plan P                          # piece table + lints; exits 1 on any FAIL li
 judgment of who is on screen). `hc render` and `hc all` analyse the shots themselves when they
 are missing, so a mark never falls back to a blind crop (the mechanics, not the looking).
 
-Fix every FAIL. Read every WARN and fix it or note in one line why it stands. `plan` is cheap:
-run it after every edit.
+Fix every FAIL; fix each WARN or note in one line why. `plan` is cheap: run it after every edit.
+
+**Paper edit (user): the words before the render.** Show each clip's words in play order, every
+source jump marked and sized, plus one improvement pass, and stop (`editing.md`, "Paper edit").
+Then run `hc all P <clip>...` on two or three and stop for the user's ear before the rest.
 
 ### 6. Render
 
@@ -195,8 +196,7 @@ the QA summary (FAIL and WARN counts plus anything you explained), the three sur
 (hook card, cover headline, title), draft post copy if asked, and any cherry-picks or risks.
 
 **Gate E (user): approval.** Approval means the user has the files. You never upload or publish.
-Update `moments.md`: CUT rows get what was exported; anything deferred becomes BANKED with a
-reason for next time.
+Update `moments.md`: CUT rows get what was exported; deferred rows become BANKED with a reason.
 
 ## The iteration loop
 
