@@ -267,8 +267,11 @@ def grab_frames(path, indices, size: tuple[int, int] | None = None, ss: float | 
             cmd += ["-ss", f"{ss:.6f}"]
         # -enc_time_base -1: the rawvideo muxer keeps the decoder's timestamps, so MKV/WebM
         # sources never trip "non monotonically increasing dts" after a seek.
+        # -frames:v: stop once the last selected frame is out; without it ffmpeg decodes the
+        # rest of the source (an hour of 4K for a frame early in a long episode).
         cmd += ["-i", str(path), "-map", "0:v:0", "-vf", vf, "-fps_mode", "passthrough",
-                "-enc_time_base", "-1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+                "-enc_time_base", "-1", "-frames:v", str(len(chunk)), "-f", "rawvideo",
+                "-pix_fmt", "rgb24", "-"]
         proc = subprocess.run(cmd, capture_output=True)
         if proc.returncode != 0:
             msg = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]

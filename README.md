@@ -163,10 +163,13 @@ What happens next:
    speaker, the hook line word for word, where it sits in the recording, an estimated length and
    why it was picked; about eight per hour of source at most) and stops. You approve, cut or
    add. Nothing is cut before this.
-4. **It builds the clips.** It checks who is on camera, writes the edit spec, renders, reads its
-   own contact sheets, makes covers and runs QA. A clip whose hook line it cannot attribute with
-   certainty is dropped, and it tells you.
-5. **Your second decision: the files.** It hands you the `export/` folder, a grid of the covers,
+4. **Your second decision: the words.** It checks who is on camera and writes the edit spec, then
+   shows each clip's words in play order, every jump in the recording marked and sized, with a
+   few suggested changes as yes or no, and stops. Nothing renders before this. Then it renders
+   two or three clips for you to play before the rest. A clip whose hook line it cannot attribute
+   with certainty is dropped, and it tells you.
+5. **It builds the clips.** It renders, reads its own contact sheets, makes covers and runs QA.
+6. **Your third decision: the files.** It hands you the `export/` folder, a grid of the covers,
    the QA summary and, for each clip, the hook card, cover headline and title. A clip whose QA
    failed or is incomplete is held back and listed. `export/by-ear.md` lists every join, the
    opening and the ending of each clip with the words on both sides and the time in the file:
