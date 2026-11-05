@@ -164,10 +164,16 @@ What happens next:
    why it was picked; about eight per hour of source at most) and stops. You approve, cut or
    add. Nothing is cut before this.
 4. **Your second decision: the words.** It checks who is on camera and writes the edit spec, then
-   shows each clip's words in play order, every jump in the recording marked and sized, with a
-   few suggested changes as yes or no, and stops. Nothing renders before this. Then it renders
-   two or three clips for you to play before the rest. A clip whose hook line it cannot attribute
-   with certainty is dropped, and it tells you.
+   puts each clip's words on paper in play order, every jump in the recording marked and sized.
+   It works on the words in several rounds, runs a check that argues against every change and
+   keeps only the ones that survive, reads the clips as a set, and hands you one plan with the
+   words: each suggested change as a yes or no with the words before and after, the ideas the
+   check killed (you can bring one back), and an order to post in. It stops there; nothing
+   renders before you answer. On one later run, ten clips took 42 minutes and about 4.8M tokens
+   with 21 agents working at once; a single session has not been timed. Ask for a quick pass to
+   spend less: one round plus the check, then the set read and the plan (jobs of three clips or
+   fewer get it by default). Then it renders two or three clips for you to play before the rest.
+   A clip whose hook line it cannot attribute with certainty is dropped, and it tells you.
 5. **It builds the clips.** It renders, reads its own contact sheets, makes covers and runs QA.
 6. **Your third decision: the files.** It hands you the `export/` folder, a grid of the covers,
    the QA summary and, for each clip, the hook card, cover headline and title. A clip whose QA
@@ -185,7 +191,7 @@ renders that change on every pass. If you name none, Claude uses a folder under
 `~/hook-cutter-projects` (set `HOOKCUTTER_PROJECTS` to change it; `hc doctor` shows the one
 in force). The finished files are in its `export/` subfolder: copy that to wherever you keep
 finished work. Posting them is up to you: the skill never uploads or publishes. No run time
-is promised: the one production run took about two and a half hours for eleven clips with
+is promised: the first production run took about two and a half hours for eleven clips with
 several agents working at once, and a single session like the one above has not been timed.
 
 ## Known issues
