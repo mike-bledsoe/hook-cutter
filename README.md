@@ -169,10 +169,11 @@ What happens next:
    keeps only the ones that survive, reads the clips as a set, and hands you one plan with the
    words: each suggested change as a yes or no with the words before and after, the ideas the
    check killed (you can bring one back), and an order to post in. It stops there; nothing
-   renders before you answer. On one later run, ten clips took 42 minutes and about 4.8M tokens
-   with 21 agents working at once; a single session has not been timed. Ask for a quick pass to
-   spend less: one round plus the check, then the set read and the plan (jobs of three clips or
-   fewer get it by default). Then it renders two or three clips for you to play before the rest.
+   renders before you answer. On one later run, on ten clips already rendered once, it took 42
+   minutes and about 4.8M subagent tokens across 21 agents; a single session has not been timed.
+   Ask for a quick pass to spend less: one round plus the check, then the set read and the plan
+   (jobs of three clips or fewer get it by default). Then it renders two or three clips for you to
+   play before the rest.
    A clip whose hook line it cannot attribute with certainty is dropped, and it tells you.
 5. **It builds the clips.** It renders, reads its own contact sheets, makes covers and runs QA.
 6. **Your third decision: the files.** It hands you the `export/` folder, a grid of the covers,
