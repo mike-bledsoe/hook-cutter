@@ -12,18 +12,19 @@ where each cut falls.
 2. Find exact first and last words with `hc find P "phrase"` and `hc words P A B`.
 3. Pick a shape (below) and write the pieces, each with `expect` anchors.
 4. `hc plan P CLIP`: read the piece table (source and output times, durations) and every lint.
-5. Paper edit (below): the user reads each clip's words, with one improvement pass, before any
-   render.
+5. Paper edit (below): improvement rounds, a skeptic and a set read on the words, then one plan
+   the user answers item by item, before the first render.
 6. `hc all` on a pilot of two or three clips for the user's ear, then render the rest; read the
    sheets, tighten. Two review passes is normal.
 
 ## Paper edit
 
-Before the first render, put every clip on paper for the user. Words are free to change; a render
-costs minutes and a listen, and a cut that reads wrong on paper sounds wrong too. Do it on the
-first clean `hc plan`, before `hc shots P <clip>` and framing marks: an approved change moves the
-clip's range, so run `hc shots` again for every clip whose pieces changed. A caption-only clip has
-no pieces and skips this; a job of one to three clips skips the pilot (step 5).
+Before the first render, every time, put every clip on paper and work on the words there. Words
+are free to change; a render costs minutes and a listen, and a cut that reads wrong on paper
+sounds wrong too. Do it on the first clean `hc plan`. If you already ran `hc shots P <clip>`
+(SKILL.md step 5), that is fine: an approved change moves the clip's range, so run it again, and
+check the framing marks, for every clip whose pieces changed. A caption-only clip has no pieces
+and skips this; a job of one to three clips skips the pilot (step 7).
 
 1. **Write it out.** `P/notes/paper-edit/<clip>.md`: the words in play order, read back with
    `hc words P A B` for each piece, a speaker label on every turn (as in `transcript.md`),
@@ -38,22 +39,127 @@ no pieces and skips this; a job of one to three clips skips the pilot (step 5).
    Speaker B:  Half of everything we [cut: you know, we] billed came from them.
    ```
 
-2. **One improvement pass on the words.** Per clip: what already works (it stays), then at most a
-   few changes that would make it better, each with its cost: new seams nobody has heard, seconds
-   gained or lost, what goes. The usual moves: open on the claim (rule 1), cut where the speaker
-   describes instead of says, cut a softener between two strong lines, put back a word that
-   bounds the claim (rule 7) or names the subject (rule 5), let a line run in the order it was
-   said. "Leave as is" is a valid answer and often the right one. If the user has a review method
-   of their own, use it.
-3. **Size the jumps.** A jump of a few seconds reads as a trim. A jump of a minute or more inside
+2. **Size the jumps.** A jump of a few seconds reads as a trim. A jump of a minute or more inside
    one clip can join two thoughts into a claim the speaker never made (SKILL.md hard rule 3,
    `fidelity.md`). Prefer the version with fewer and smaller jumps, and name every jump over about
    30 s to the user. On one long interview, jumps of 105 to 129 s were flagged on first listen;
    jumps of 22 to 68 s were not.
-4. **Stop.** Show the paper edits and each proposed change as a yes or no. Only approved changes
-   go into clips.json; a clip the user drops here or at the pilot goes back to BANKED or PASS
-   `user-cut` in `moments.md`.
-5. **Pilot, then the rest.** Run `hc all P <clip>...` on two or three clips (the riskiest seams
+3. **Improve it in rounds.** Per clip, two or three rounds on the words, on paper only: nothing
+   renders and clips.json does not change. Each round names what already works (it stays), then
+   proposes only the changes worth their cost; proposing none is a full answer. Give each change
+   its cost (new seams nobody has heard, seconds gained or lost, what goes), its length and its
+   clips.json edit (piece word indices, `omit`, `hold_after`, new `expect` anchors), so a yes
+   applies exactly what was read. Estimate the length from `hc words` times: tightening leaves
+   roughly 85 to 90 percent of the raw span (`hooks.md` section 9); write it as "about 41 s".
+   The next round reads the clip with the last round's changes in, and goes a level deeper:
+   - round 1, the surface: the opening, preamble and filler (rules 1-6);
+   - round 2, the structure: the order of the pieces, each jump, what the clip is about (rules 8,
+     9 and 16);
+   - round 3, the craft: the exact words on both sides of each seam, and the ending (rules 7, 10
+     and 11).
+
+   Round 2 runs even when round 1 finds nothing (the jumps live there); round 3 runs only when
+   round 2 found something worth its cost. "Leave as is" stays a valid result, and often the
+   right one. Read the source around each jump (`hc words P A B`): a change can bring back what
+   the edit skipped. The usual moves: open on the claim (rule 1), let the tape run where the edit
+   cut a live turn (an answer, a laugh, an interruption), cut where the speaker describes instead
+   of says, cut a softener between two strong lines, put back a word that bounds the claim (rule
+   7) or names the subject (rule 5). On the run that added the rounds (every clip took all
+   three), the moves that survived across the set were running the tape over a cut turn and
+   cutting a description; reorders built only to chase an early-payoff number (the time the
+   strongest line lands) lost, and opening on the claim (rule 1) still stands. When a change
+   rests on an earlier one, say which; when it revises or undoes one, mark that one
+   superseded. Append each round below the clip's words in its
+   paper-edit file. If the user's instructions name an improvement method of their own, run the
+   rounds with it. A quick pass (the user asks for one, or the job is three clips or fewer) is
+   one round over all three levels, the two moves that survived first, then the skeptic; steps
+   5 and 6 still run.
+4. **The skeptic: try to refute every change.** Per clip, an adversarial read of each proposed
+   change that defaults to "leave". It asks:
+   - does it change the meaning or who said what, or bring back something cut on purpose: a
+     `Risks` row in `moments.md`, a promo (rule 16), garbled audio (rule 20), or source another
+     clip uses (lint L14)? (`fidelity.md` sections 1, 3 and 6)
+   - does it add a seam nobody has heard, or a bigger jump?
+   - does it cut a qualifier that bounds the claim (rule 7), or the subject (rule 5)?
+   - does it chase a number (an earlier payoff, fewer seconds) at the cost of the thought?
+
+   A change goes into PLAN.md only when it survives all four; in doubt, leave. A change that
+   rests on one the skeptic kills is read again without it, or dies with it. Write each verdict
+   and its reason in the clip's paper-edit file, then end the file with the clip's words with
+   only the surviving changes in: the set read (step 5) reads that draft, and PLAN.md lists those
+   changes. On the run that added this step, the skeptic
+   killed the lead idea on 6 of 10 clips, and 3 of those clips went from change to leave.
+
+   When the host can run agents in parallel, one agent per clip runs the rounds and a second per
+   clip runs the skeptic, so no change is judged by the agent that proposed it; one more reads
+   the set (step 5) into `P/notes/paper-edit/set.md`. Brief each with P, its clip id and
+   paper-edit file (the set reader gets them all), this section and `fidelity.md`. They run only
+   `hc words` and `hc find`, write only to their own file, and never ask the user. The main
+   agent judges the set changes and writes PLAN.md. Single-threaded, finish every clip's rounds
+   first, then run the skeptic as a separate pass over each clip's file, one change at a time:
+   write the case for leave before the verdict.
+5. **Read the set.** One read across all the clips together, after the skeptic. The shortlist's
+   set pass (`hooks.md` section 8) chose the moments; this one reads their words:
+   - a distinctive line or phrase heard in more than one clip (not a name or a topic word): keep
+     it where it lands best, cut it elsewhere only where that clip still stands alone;
+   - two clips making the same argument: say so, and propose cutting one toward another point,
+     or banking it;
+   - a posting order that keeps similar clips (same argument, register or speaker) apart;
+   - anything that repeats a clip already posted (the `Already posted` line of the `moments.md`
+     header, `hooks.md` section 2): propose dropping it, PASS `dupe-posted`.
+
+   A set change that edits a clip faces the skeptic's four questions too, from an agent that did
+   not propose it. Single-threaded, finish the set read first, then judge each such change in a
+   separate pass: write the case for leave before the verdict. On the run that added it, the set
+   read took a phrase repeated across clips from 3 plays to 1, and set the order.
+6. **One plan, then stop.** Write `P/notes/paper-edit/PLAN.md`:
+   - a table, one row per clip: the clip, what it is, length now, its biggest jump, the call
+     (change or leave), the change, length after. A leave row says why in the change cell: what
+     works, and the lead idea the skeptic killed, if any;
+   - every jump over about 30 s that stays, one line each: clip, size, direction, what it skips;
+   - each surviving change as a numbered yes-or-no item: the words before and after, why, the
+     cost, the new seams and what to listen for at each, and its clips.json edit. A change that
+     rests on another says `Rests on: N`, comes after it, and quotes the words before as they
+     read once N is in;
+   - the ideas the skeptic killed, lettered (A, B, ...), each with its reason. A letter asks for
+     a second look, not an edit: an idea killed for meaning or attribution (SKILL.md hard rules 2
+     and 3) stays killed; any other comes back as a numbered item, on the clip as approved, for
+     its own yes or no;
+   - the set notes and a suggested posting order.
+
+   ```
+   | clip | what it is | now | biggest jump | call | change | after |
+   |---|---|---|---|---|---|---|
+   | c01-fired-biggest-client | firing the client worth half her revenue | 34 s | -16.8 s | leave | leave: opens on the claim; killed: play it in source order (A) | 34 s |
+   | c02-hid-the-numbers | a year of hiding the numbers from the team | 41 s | -48.0 s | leave | leave: the jump back stays inside one story; nothing proposed | 41 s |
+   | c03-were-you-scared | the host asks if she was scared | 38 s | +3.4 s | change | let her answer run (1) | about 41 s |
+
+   Jumps over 30 s: c02 -48.0 s, back: to the day she stopped sharing them.
+
+   1. c03: let her answer run. Yes or no?
+      Opens (piece 0, unchanged): Speaker B:  I ended a six-year contract in one phone call.
+      Before: Speaker A:  Weren't you scared?
+              [JUMP +3.4 s, forward: skips her answer]
+              Speaker B:  The month after was my best month ever.
+      After:  Speaker A:  Weren't you scared?
+              Speaker B:  Terrified. I didn't sleep. The month after was my best month ever.
+      Why: the edit cut a live turn; her answer is the beat. Cost: about +3 s (3.4 s of source,
+      tightened), one seam fewer, no new one. Listen for: the breath before "Terrified".
+      Edit: merge pieces 1 and 2 into words [6120, 6134]; expect ["Weren't you scared",
+      "best month ever"].
+
+   Killed: A. c01, play it in source order: one jump fewer, but the claim lands 17 s in (rule 1).
+   Set: no phrase repeats. Post c01, c02, c03: c01 and c03 tell one story, so c02 goes between.
+   ```
+
+   Show PLAN.md with each clip's words as written in step 1 (the top of its paper-edit file),
+   and stop. The user answers each item yes or no; a no drops every item that rests on it unless
+   the user says otherwise. Apply each approved edit as recorded, run `hc plan` again, and tell
+   the user when a length moved by more than about 2 s. A clip the user drops here or at the
+   pilot goes back to BANKED or PASS `user-cut` in `moments.md` and comes out of clips.json:
+   `hc render P`, `hc qa P` and `hc export P` take every clip there, whatever the ledger says.
+   Then run `hc export P` for all clips; it renumbers the files and removes the dropped clip's.
+7. **Pilot, then the rest.** Run `hc all P <clip>...` on two or three clips (the riskiest seams
    first), read their sheets and QA (gates C and D), and stop: the user plays them with
    `P/export/by-ear.md` open before you render the rest. On the run that added this step, the
    first batch of 14 renders lost 4 clips and needed 2 re-cuts on first listen, and the clips

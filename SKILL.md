@@ -139,8 +139,8 @@ are missing, so a mark never falls back to a blind crop (the mechanics, not the 
 Fix every FAIL; fix each WARN or note in one line why. `plan` is cheap: run it after every edit.
 
 **Paper edit (user): the words before the render.** Show each clip's words in play order, every
-source jump marked and sized, plus one improvement pass, and stop (`editing.md`, "Paper edit").
-Then run `hc all P <clip>...` on two or three and stop for the user's ear before the rest.
+source jump marked and sized, with a yes-or-no `PLAN.md` from rounds, a skeptic and a set read; stop
+(`editing.md`, "Paper edit"). Then `hc all P <clip>...` on two or three; stop for the user's ear.
 
 ### 6. Render
 
@@ -256,7 +256,7 @@ folder or a full disk (run `hc doctor`). `HC_VERBOSE=1` prints ffmpeg command li
 | File | Read it when |
 |---|---|
 | `references/hooks.md` | before mining: recall pass, ledger format, taxonomy, gates, scores, set pass, shortlist, worked examples |
-| `references/editing.md` | writing pieces: cold opens, preamble, repetition, endings, length bands, notes-to-edits |
+| `references/editing.md` | writing pieces and the paper edit: cold opens, preamble, repetition, endings, length bands, notes-to-edits |
 | `references/captions.md` | choosing a style, accents, legibility, safe zones, hook card mechanics, glyphs |
 | `references/packaging.md` | hook card vs title vs cover, parse-cold covers, frame curation, post copy |
 | `references/fidelity.md` | anything touching attribution, numbers, risky claims, rights |

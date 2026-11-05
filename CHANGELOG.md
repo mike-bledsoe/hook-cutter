@@ -8,10 +8,26 @@
   their bytes are unchanged. QA reports go stale once (their code digest covers every module);
   renders stay current.
 - Paper edit before the first render (SKILL.md step 5, `editing.md` "Paper edit"): the user
-  reads each clip's words in play order with every source jump marked and sized, plus one
-  improvement pass, and approves before anything renders; then a pilot of two or three clips
+  reads each clip's words in play order with every source jump marked and sized, plus the
+  improvement process below, and approves before anything renders; then a pilot of two or three clips
   for their ear before the rest. On the production run behind it, 4 of the first 14 renders
   were dropped and 2 re-cut on first listen, and the large source jumps were the ones flagged.
+- The paper edit's single improvement pass becomes a process that runs every time before the
+  first render (`editing.md` "Paper edit", steps 3 to 6): per clip, two or three rounds on the
+  words, each a level deeper, the third only when the second found something worth its cost; a
+  skeptic per clip that tries to refute each change and defaults to leave; one read across the
+  set; then one plan, `P/notes/paper-edit/PLAN.md`, that the user answers yes or no per change,
+  shown with each clip's words, every jump over about 30 s and the ideas the skeptic killed. A
+  quick pass (on request, or for three clips or fewer) is one round and the skeptic. Evidence,
+  from that same run (a 79-minute guest interview whose first 14 renders, cut straight off a
+  hook-line shortlist, lost 4 clips on first listen and needed 2 re-cuts): on the 10 kept clips,
+  three rounds and a skeptic per clip plus one set read (31 rounds) produced 474 ideas and kept
+  11 changes on 6 clips; 4 clips were left as they were. The skeptic killed the lead idea on 6
+  of the 10, and 3 of those went from change to leave. Two moves survived across the set:
+  running the tape where the edit had cut a live turn, and cutting where the speaker describes
+  instead of says; reorders built to chase an early-payoff number lost. The set read took a
+  phrase repeated across clips from 3 plays to 1 and set a posting order. The user then answered
+  each change yes or no, one by one. Cost: about 4.8M subagent tokens, 42 minutes, 21 agents.
 - `hc ingest` warns when the project folder is one a sync service uploads (iCloud Desktop &
   Documents, iCloud Drive, Dropbox, OneDrive, Google Drive, other cloud storage apps): a
   project holds gigabytes of source, segments and renders that change on every pass.
