@@ -100,6 +100,8 @@ WINDOW_SLACK = 0.02              # G16: a face x this close outside the window s
 G16_WINDOW_MODES = ("crop", "rect")   # G16: windows that can show one face of a multi-face shot
 G16_MERGE_GAP = 0.5
 G16_FAIL_S = 1.5
+G16_MIN_OVERLAP = 0.005          # G16: a window must overlap a multi-face span by more than this (s) to be a crop of it;
+                                 # under a fifth of a frame is float noise where a single shot meets a two-shot
 QA_VERSION = 2
 QA_CODE_CHANGED = "the QA checks changed since this report was made"     # qa_staleness reason
 ASR_CACHE_VERSION = 2
@@ -2449,7 +2451,7 @@ def framing_attribution(plan: dict, clip: dict, shots: dict, windows: list, spea
         best, ov = None, 0.0
         for a, b, sh in spans:
             o = min(b, t1) - max(a, t0)
-            if o > ov:
+            if o > max(ov, G16_MIN_OVERLAP):
                 best, ov = sh, o
         return best
 
