@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- G16 (framing attribution) no longer judges a crop of a single-face shot as a crop of the
+  two-shot it meets at a cut. A window now counts as part of a multi-face span only when it
+  overlaps it by more than 0.005 s (`G16_MIN_OVERLAP`, under a fifth of a frame). The plan's
+  out times carry float noise (a segment out of 9.700034 for 9.7), so the speaker's own single
+  "overlapped" the next or previous two-shot by 1e-6 to 3.3e-5 s and was checked against their
+  two-shot x: on a 14-clip run from one 4K interview, 7 clips failed G16 this way and 4 were held
+  from export with no wrong face anywhere. A real crop of a two-shot, even one frame long, is
+  still judged and still fails on the wrong face (regression test in `test_fix_qa.py`). QA
+  reports go stale once (their code digest covers every module); renders stay current.
+  Related, not fixed here: the renderer's per-frame shot lookup has the same 4-decimal boundary
+  issue, which can leave one frame cropped at the previous shot's face after a cut.
+
 - Frame grabs (covers and QA) stop decoding once the last selected frame is out (`-frames:v`).
   Before, every grab decoded its input to the end, so on a 79-minute 4K source QA of one clip
   near the start ran over an hour; a test grab ran about 30x faster. The frames, their order and

@@ -478,6 +478,28 @@ class FramingAttribution(unittest.TestCase):
         self.assertEqual(self.run16(self.plan(), self.window(0.1, 0.4), speakers)[0], "PASS")
         self.assertEqual(self.run16(self.plan(sp="Speaker B"), self.window(0.6, 0.9), speakers)[0], "PASS")
 
+    def test_adjacent_single_shot_float_noise_is_not_a_crop_of_the_two_shot(self):
+        # A crop of a single-face shot that meets a two-shot at a cut: the plan's out times put
+        # the two-shot's end 1e-6 s past the single window's start (a segment out time of 1e-6 s, as
+        # real plans carry, e.g. 9.700034 for 9.7). That is float noise, not a
+        # crop of the two-shot, so the window is not judged. A window that really overlaps the
+        # two-shot by a frame is still judged (and still fails on the wrong face).
+        shots = {"shots": [dict(self.SHOTS["shots"][0]),
+                           {"start_src": 130.0, "end_src": 140.0, "kind": "single", "multi_face": False,
+                            "faces": [{"id": "A", "x": 0.55, "y": 0.5, "h": 0.3, "presence": 1.0}]}]}
+        words = [{"i": k, "s_out": 10.0 + 0.5 * k, "e_out": 10.4 + 0.5 * k, "sp": None, "piece": 1}
+                 for k in range(8)]
+        plan = {"segments": [{"src": [100.0, 110.0], "out": [0.000001, 10.000001]},
+                             {"src": [130.0, 135.0], "out": [10.000001, 15.0]}],
+                "words": words, "pieces": [{"n": 0, "role": "body"}, {"n": 1, "role": "body"}]}
+        speakers = {"Speaker A": {"x": 0.75}}
+        single = [{"seg": 1, "out": [10.0, 15.0], "mode": "crop", "lo": 0.4, "hi": 0.7, "multi_face": False}]
+        st, notes, _ = qa.framing_attribution(plan, {"speaker": "Speaker A"}, shots, single, speakers)
+        self.assertNotEqual(st, "FAIL", notes)
+        frame = [{"seg": 1, "out": [9.967, 15.0], "mode": "crop", "lo": 0.4, "hi": 0.7, "multi_face": False}]
+        st, notes, _ = qa.framing_attribution(plan, {"speaker": "Speaker A"}, shots, frame, speakers)
+        self.assertEqual(st, "FAIL", notes)
+
     def test_reaction_and_short_spans_warn(self):
         speakers = {"Speaker A": {"x": 0.27}, "Speaker B": {"x": 0.75}}
         self.assertEqual(self.run16(self.plan(role="reaction"), self.window(0.6, 0.9), speakers)[0], "WARN")
