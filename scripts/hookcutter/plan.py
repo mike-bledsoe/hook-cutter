@@ -1880,7 +1880,7 @@ def _lint_hidden(ctx, plan, transcript, L) -> None:
 
     def around(k0, k1, t0=math.inf, t1=-math.inf):
         a, b = min(float(W[k0]["s"]), t0), max(float(W[k1]["e"]), t1)
-        return (f"transcribe src {fmt(a)}-{fmt(b)} on its own ({_listen_cmd(a, b)}, which writes "
+        return (f"transcribe src {fmt(a)}-{fmt(b)} on its own ({_listen_cmd(a, b, E)}, which writes "
                 "nothing into P) before trusting the words")
 
     # (c) wordless sound at speech level, below L19's length
@@ -1938,11 +1938,23 @@ def _lint_hidden(ctx, plan, transcript, L) -> None:
         L("L21", "WARN", msg, _out_near(plan, a))
 
 
-def _listen_cmd(s: float, e: float) -> str:
+def _listen_cmd(s: float, e: float, E=None) -> str:
     """The `hc listen` command for source stretch [s, e] with LISTEN_MARGIN each side (L15, L21);
-    a stretch past LISTEN_MAX is named as slices of at most that length."""
-    from .listen import LISTEN_MARGIN, LISTEN_MAX
+    a stretch past LISTEN_MAX is named as slices of at most that length. Given the energy track
+    E, an edge the margin puts inside voiced audio moves out to the quiet edge hc listen itself
+    would suggest (listen.edge_report), so the slice starts and ends in a pause: one cut inside
+    the neighbouring words drops or invents the very words the lint asks about."""
+    from .listen import LISTEN_MARGIN, LISTEN_MAX, edge_report
     lo, hi = max(0.0, s - LISTEN_MARGIN), e + LISTEN_MARGIN
+    if E is not None:
+        top = E.end
+        hi = min(hi, top)
+        q = edge_report(E, lo, "start", 0.0, top)
+        if q["voiced"] and q["quiet"] is not None:
+            lo = min(lo, q["quiet"])
+        q = edge_report(E, hi, "end", 0.0, top)
+        if q["voiced"] and q["quiet"] is not None:
+            hi = max(hi, q["quiet"])
     if hi - lo > LISTEN_MAX:
         return (f"hc listen P {lo:.2f} {lo + LISTEN_MAX:.2f} and on to {hi:.2f}, in slices of "
                 f"at most {LISTEN_MAX:.0f} s that meet in a pause")

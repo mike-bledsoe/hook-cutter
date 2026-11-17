@@ -8,6 +8,7 @@ energy tracks here are synthetic: speech at -20 dB over a -60 dB floor."""
 from __future__ import annotations
 
 import math
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -310,36 +311,59 @@ class TestWhereItPoints(unittest.TestCase):
 
 
 class TestPointsAtHcListen(unittest.TestCase):
-    """Each WARN prints the `hc listen` command for its stretch (from the word before to the word
-    after, 0.2 s of margin each side), the same check L15 names: the old recipe wrote a scratch
-    transcript into P, and "slice-transcribe" named no command at all."""
+    """Each WARN prints the `hc listen` command for its stretch, the same check L15 names (the
+    old recipe wrote a scratch transcript into P, and "slice-transcribe" named no command). The
+    slice runs from the word before to the word after with 0.2 s of margin, and an edge that
+    margin puts inside voiced audio moves to the nearest quiet edge outside it, as hc listen
+    itself suggests: on real interview audio a slice cut inside the neighbouring words heard
+    "I'm in a terminal" where the recording says "I'm in a, I'm in a terminal"."""
 
-    def check(self, plan, lo, hi):
+    def check(self, words, plan, extra=()):
         x = l21(plan)
         self.assertEqual(len(x), 1, plan["lints"])
         msg = x[0]["msg"]
-        self.assertIn(f"hc listen P {lo} {hi}", msg)
         self.assertIn("writes nothing into P", msg)
         self.assertNotIn("slice-transcribe", msg)
-        self.assertLessEqual(float(hi) - float(lo), listen.LISTEN_MAX + listen.LIMIT_EPS)
+        m = re.search(r"hc listen P (\d+\.\d\d) (\d+\.\d\d)", msg)
+        self.assertTrue(m, msg)
+        lo, hi = float(m.group(1)), float(m.group(2))
+        src = re.search(r"transcribe src (\S+)-(\S+) on its own", msg)
+        self.assertTrue(src, msg)
+        a, b = (P.specmod.parse_time(t) for t in src.groups())
+        self.assertLessEqual(lo, max(0.0, a - listen.LISTEN_MARGIN) + 1e-6)
+        self.assertGreaterEqual(hi, b + listen.LISTEN_MARGIN - 1e-6)
+        self.assertLessEqual(hi - lo, listen.LISTEN_MAX + listen.LIMIT_EPS)
+        E = energy(max(w[2] for w in words) + 5.0, [(w[1], w[2]) for w in words] + list(extra))
+        for t, side in ((lo, "start"), (hi, "end")):     # hc listen would not warn on it
+            self.assertFalse(listen.edge_report(E, t, side, 0.0, E.end)["voiced"], (side, msg))
+        return lo, hi
 
     def test_a_folded_word(self):
-        words = folded()                 # 'in' 3.40 .. 'terminal' ends 4.70
-        self.check(build(words, {"pieces": [{"words": [0, len(words) - 1]}]}), "3.20", "4.90")
+        words = folded()
+        self.check(words, build(words, {"pieces": [{"words": [0, len(words) - 1]}]}))
 
     def test_a_voiced_gap(self):
-        words, extra = voiced_gap()      # 'CEO.' 1.60 .. "I'm" ends 2.56
+        words, extra = voiced_gap()
         plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]}, extra=extra)
-        self.check(plan, "1.40", "2.76")
+        self.check(words, plan, extra)
 
     def test_wordless_sound(self):
-        words, extra = wordless()        # 'I' 3.40 .. 'expected' ends 4.70
+        words, extra = wordless()
         plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]}, extra=extra)
-        self.check(plan, "3.20", "4.90")
+        self.check(words, plan, extra)
+
+    def test_quiet_margins_stay_as_they_are(self):
+        # a pause before the word before and after the word after: 0.2 s into each is quiet
+        words = seq(["So", "when", "I'm", "on", "my", "laptop."]) + [("in", 4.4, 4.6)]
+        words += [("a", 4.7, 5.15), ("terminal.", 5.15, 5.6)] + seq(TAIL, start=7.0)
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]})
+        self.assertEqual(self.check(words, plan), (4.2, 5.8))
+        self.assertIn("hc listen P 4.20 5.80", l21(plan)[0]["msg"])
 
     def test_the_start_is_never_before_the_file(self):
         words = [("a", 0.1, 0.55), ("terminal", 0.55, 1.0)] + seq(TAIL, start=1.1)
-        self.check(build(words, {"pieces": [{"words": [0, len(words) - 1]}]}), "0.00", "1.20")
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]})
+        self.assertEqual(self.check(words, plan)[0], 0.0)
 
 
 class TestCleanSpeech(unittest.TestCase):
