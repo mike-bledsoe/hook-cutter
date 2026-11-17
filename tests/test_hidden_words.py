@@ -19,6 +19,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 import numpy as np  # noqa: E402
 
 from fixtures import fake_transcript  # noqa: E402
+from hookcutter import listen  # noqa: E402
 from hookcutter import plan as P  # noqa: E402
 from hookcutter import spec as S  # noqa: E402
 from hookcutter.audio import EnergyTrack  # noqa: E402
@@ -92,7 +93,7 @@ class TestFoldedWord(unittest.TestCase):
         self.assertEqual(len(x), 1, plan["lints"])
         self.assertEqual(x[0]["level"], "WARN")
         msg = x[0]["msg"]
-        for part in ("'a'", "word 8", "0:03.80", "0.45 s", "'terminal'", "slice-transcribe",
+        for part in ("'a'", "word 8", "0:03.80", "0.45 s", "'terminal'", "hc listen P",
                      "its caption"):
             self.assertIn(part, msg)
         self.assertAlmostEqual(x[0]["at_out"], P.out_time(plan, 3.8), places=2)
@@ -184,7 +185,7 @@ class TestVoicedGap(unittest.TestCase):
         x = l21(plan)
         self.assertEqual(len(x), 1, plan["lints"])
         msg = x[0]["msg"]
-        for part in ("0.26 s", "'CEO.'", "\"I'm\"", "0:02.00", "slice-transcribe"):
+        for part in ("0.26 s", "'CEO.'", "\"I'm\"", "0:02.00", "hc listen P"):
             self.assertIn(part, msg)
 
     def test_breath_and_short_gaps_do_not_warn(self):
@@ -221,7 +222,7 @@ class TestWordlessSound(unittest.TestCase):
         x = l21(plan)
         self.assertEqual(len(x), 1, plan["lints"])
         msg = x[0]["msg"]
-        for part in ("0.4 s", "0:03.62", "'I'", "'expected'", "slice-transcribe"):
+        for part in ("0.4 s", "0:03.62", "'I'", "'expected'", "hc listen P"):
             self.assertIn(part, msg)
         self.assertFalse([y for y in plan["lints"] if y["id"] == "L19"])
 
@@ -306,6 +307,39 @@ class TestWhereItPoints(unittest.TestCase):
         first = plan["segments"][0]
         self.assertAlmostEqual(x[0]["at_out"], first["out"][1], places=3)
         self.assertLess(x[0]["at_out"], plan["duration_out"] - 1.0)
+
+
+class TestPointsAtHcListen(unittest.TestCase):
+    """Each WARN prints the `hc listen` command for its stretch (from the word before to the word
+    after, 0.2 s of margin each side), the same check L15 names: the old recipe wrote a scratch
+    transcript into P, and "slice-transcribe" named no command at all."""
+
+    def check(self, plan, lo, hi):
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        msg = x[0]["msg"]
+        self.assertIn(f"hc listen P {lo} {hi}", msg)
+        self.assertIn("writes nothing into P", msg)
+        self.assertNotIn("slice-transcribe", msg)
+        self.assertLessEqual(float(hi) - float(lo), listen.LISTEN_MAX + listen.LIMIT_EPS)
+
+    def test_a_folded_word(self):
+        words = folded()                 # 'in' 3.40 .. 'terminal' ends 4.70
+        self.check(build(words, {"pieces": [{"words": [0, len(words) - 1]}]}), "3.20", "4.90")
+
+    def test_a_voiced_gap(self):
+        words, extra = voiced_gap()      # 'CEO.' 1.60 .. "I'm" ends 2.56
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]}, extra=extra)
+        self.check(plan, "1.40", "2.76")
+
+    def test_wordless_sound(self):
+        words, extra = wordless()        # 'I' 3.40 .. 'expected' ends 4.70
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]}, extra=extra)
+        self.check(plan, "3.20", "4.90")
+
+    def test_the_start_is_never_before_the_file(self):
+        words = [("a", 0.1, 0.55), ("terminal", 0.55, 1.0)] + seq(TAIL, start=1.1)
+        self.check(build(words, {"pieces": [{"words": [0, len(words) - 1]}]}), "0.00", "1.20")
 
 
 class TestCleanSpeech(unittest.TestCase):

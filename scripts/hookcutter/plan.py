@@ -1880,8 +1880,8 @@ def _lint_hidden(ctx, plan, transcript, L) -> None:
 
     def around(k0, k1, t0=math.inf, t1=-math.inf):
         a, b = min(float(W[k0]["s"]), t0), max(float(W[k1]["e"]), t1)
-        return (f"slice-transcribe src {fmt(a)}-{fmt(b)} (from a pause to a pause) before "
-                "trusting the words")
+        return (f"transcribe src {fmt(a)}-{fmt(b)} on its own ({_listen_cmd(a, b)}, which writes "
+                "nothing into P) before trusting the words")
 
     # (c) wordless sound at speech level, below L19's length
     spans = W[lo:hi] + [{"s": x, "e": y} for x, y in typed]
@@ -1938,6 +1938,17 @@ def _lint_hidden(ctx, plan, transcript, L) -> None:
         L("L21", "WARN", msg, _out_near(plan, a))
 
 
+def _listen_cmd(s: float, e: float) -> str:
+    """The `hc listen` command for source stretch [s, e] with LISTEN_MARGIN each side (L15, L21);
+    a stretch past LISTEN_MAX is named as slices of at most that length."""
+    from .listen import LISTEN_MARGIN, LISTEN_MAX
+    lo, hi = max(0.0, s - LISTEN_MARGIN), e + LISTEN_MARGIN
+    if hi - lo > LISTEN_MAX:
+        return (f"hc listen P {lo:.2f} {lo + LISTEN_MAX:.2f} and on to {hi:.2f}, in slices of "
+                f"at most {LISTEN_MAX:.0f} s that meet in a pause")
+    return f"hc listen P {lo:.2f} {hi:.2f}"
+
+
 def _flag_msg(f: dict, a, b, t_src=None) -> str:
     kind = f.get("kind", "flag")
     if kind == "false_start":
@@ -1957,17 +1968,11 @@ def _flag_msg(f: dict, a, b, t_src=None) -> str:
         return (f"low-confidence transcript word{w}{p} at words {a}-{b}: check it and add a "
                 "\"fix\" if it is wrong")
     if kind == "unworded_audio":
-        from .listen import LISTEN_MARGIN, LISTEN_MAX
         fs, fe = float(f.get("s", 0.0)), float(f.get("e", 0.0))
-        lo, hi = max(0.0, fs - LISTEN_MARGIN), fe + LISTEN_MARGIN
-        how = f"hc listen P {lo:.2f} {hi:.2f}"
-        if hi - lo > LISTEN_MAX:
-            how = (f"hc listen P {lo:.2f} {lo + LISTEN_MAX:.2f} and on to {hi:.2f}, in slices of "
-                   f"at most {LISTEN_MAX:.0f} s that meet in a pause")
         return (f"{fe - fs:.1f} s of sound with no words at src {specmod.fmt_time(fs)} is "
                 "inside the clip (laughter, music or speech ASR missed): transcribe that stretch "
-                f"on its own before keeping it ({how}, which writes nothing into P) and caption "
-                "speech the transcript missed with \"insert\"")
+                f"on its own before keeping it ({_listen_cmd(fs, fe)}, which writes nothing into "
+                "P) and caption speech the transcript missed with \"insert\"")
     if kind == "dropout":
         n = f.get("vtt_words")
         n = len(n) if isinstance(n, (list, tuple)) else n
