@@ -1799,10 +1799,12 @@ def _srt_split(words: list[str]) -> list[str] | None:
 
 def _cap_first(word: str) -> str:
     """The first letter in capitals ("it's" -> "It's"); a word that already holds a capital
-    ("eBook", "SQL") is left as it is."""
+    ("eBook", "SQL") or starts with a number ("3pm", "$5k", "90s") is left as it is."""
     if any(c.isupper() for c in word):
         return word
     for k, c in enumerate(word):
+        if c.isdigit():
+            return word
         if c.isalpha():
             return word[:k] + c.upper() + word[k + 1:]
     return word

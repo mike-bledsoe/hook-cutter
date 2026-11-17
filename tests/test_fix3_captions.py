@@ -7,8 +7,9 @@ in two fixed tiles, a transcript with no speaker labels):
      the words are said together, so emphasis.per_page 1 lights both
   3  a word whose onset is under the hook card is never captioned (the .srt still carries it),
      and plan lint L08 judges an accent the same way
-  4  an insert that starts at the same moment as the next transcript word plays before it
-  5  the .srt capitalises a cue that opens a piece on a new sentence
+  4  an insert that starts at the same moment as the next transcript word plays before it, all
+     of its words together
+  5  the .srt capitalises a cue that opens a piece on a new sentence (never a word led by a digit)
 
 Every test is synthetic (generated plans and words)."""
 from __future__ import annotations
@@ -217,11 +218,60 @@ class InsertTiedWithTheNextWord(unittest.TestCase):
                          ["about", "like", "helping", "people.", "Then", "more."])
         toks = captions.display_tokens(plan, clip, CLEAN["caption"])
         self.assertEqual([t.text for t in toks], ["ABOUT", "LIKE", "HELPING", "PEOPLE", "THEN", "MORE"])
+        # "helping" is heard once "like" ends, so its caption starts there
+        by = {w["text"]: w for w in plan["words"]}
+        self.assertAlmostEqual(by["helping"]["s_out"], by["like"]["e_out"], places=4)
+        self.assertGreaterEqual(by["helping"]["e_out"], by["helping"]["s_out"])
 
     def test_a_word_that_starts_first_still_plays_first(self):
         plan, clip = self.plan([1.65, 1.8])
         self.assertEqual([w["text"] for w in plan["words"]],
                          ["about", "helping", "like", "people.", "Then", "more."])
+        by = {w["text"]: w for w in plan["words"]}
+        self.assertLess(by["helping"]["s_out"], by["like"]["s_out"])   # its own start, unmoved
+
+    def test_the_word_an_insert_follows_keeps_its_start(self):
+        # An insert that starts with its own `after` word goes after it, and that word's caption
+        # stays where the transcript put it.
+        base = FA.build(self.WORDS, {"c01": {"pieces": [{"words": [0, 4]}]}}, dur=8.0)
+        clip = {"pieces": [{"words": [0, 4]}],
+                "insert": [{"after": 0, "text": "really", "src": [1.0, 1.2]}]}
+        plan = FA.build(self.WORDS, {"c01": clip}, dur=8.0)
+        self.assertEqual([w["text"] for w in plan["words"]][:3], ["about", "really", "helping"])
+        self.assertEqual(plan["words"][0]["s_out"], base["words"][0]["s_out"])
+        toks = captions.display_tokens(plan, clip, CLEAN["caption"])
+        self.assertEqual([t.text for t in toks][:3], ["ABOUT", "REALLY", "HELPING"])
+
+    def test_a_multi_word_insert_tied_with_the_next_word_stays_together(self):
+        # Only the insert's first word starts with "helping"; the others start after it, and the
+        # plan must not slip "helping" in between them (QA G5 expects the insert as one run).
+        from hookcutter import qa
+        for text, src, said in [
+                ("kind of like", [1.6, 1.95], ["kind", "of", "like"]),
+                ("you know", [1.6, 1.9], ["you", "know"])]:
+            with self.subTest(text=text):
+                clip = {"pieces": [{"words": [0, 4]}],
+                        "insert": [{"after": 0, "text": text, "src": src}]}
+                plan = FA.build(self.WORDS, {"c01": clip}, dur=8.0)
+                self.assertEqual(FA.lints(plan, "L01"), [])
+                want = ["about"] + said + ["helping", "people.", "Then", "more."]
+                self.assertEqual([w["text"] for w in plan["words"]], want)
+                toks = captions.display_tokens(plan, clip, CLEAN["caption"])
+                self.assertEqual([t.text for t in toks],
+                                 [w.upper().rstrip(".") for w in want])
+                self.assertEqual([t for _i, t in qa.intent_sequence(plan)], want)
+                self.assertFalse(any("_s0" in w or "_after" in w for w in plan["words"]))
+                starts = [t.s for t in toks]
+                self.assertEqual(starts, sorted(starts))
+                by = {w["text"]: w for w in plan["words"]}
+                self.assertAlmostEqual(by["helping"]["s_out"], by[said[-1]]["e_out"], places=4)
+
+    def test_a_multi_word_insert_after_a_word_that_starts_first_stays_after_it(self):
+        clip = {"pieces": [{"words": [0, 4]}],
+                "insert": [{"after": 0, "text": "kind of like", "src": [1.65, 1.95]}]}
+        plan = FA.build(self.WORDS, {"c01": clip}, dur=8.0)
+        self.assertEqual([w["text"] for w in plan["words"]],
+                         ["about", "helping", "kind", "of", "like", "people.", "Then", "more."])
 
 
 # ----------------------------------------------------------------------------- 5. srt case at a piece start
@@ -245,6 +295,18 @@ class SrtCaseAtAPieceStart(unittest.TestCase):
         cues = self.cues([("start", 90, FB.spoken("We sold it first.")),
                           ("piece", 120, FB.spoken("eBook sales went up.", start=0.2))])
         self.assertEqual(cues[1], "eBook sales went up.")
+
+    def test_a_word_led_by_a_digit_is_left_alone(self):
+        # "3pm" is not a word to capitalise: "3Pm" garbles it (likewise "10x", "2nd", "$5k").
+        for text in ["3pm is the time.", "10x growth came next.", "2nd place won.",
+                     "$5k a month is fine.", "40-year-old men run.", "90s music is back."]:
+            with self.subTest(text=text):
+                cues = self.cues([("start", 90, FB.spoken("We sold it first.")),
+                                  ("piece", 120, FB.spoken(text, start=0.2))])
+                self.assertEqual(cues[1], text)
+                self.assertEqual(self.cues([("start", 120, FB.spoken(text))])[0], text)
+        self.assertEqual(captions._cap_first("'cause"), "'Cause")
+        self.assertEqual(captions._cap_first("...and"), "...And")
 
 
 if __name__ == "__main__":

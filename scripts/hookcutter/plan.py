@@ -1191,7 +1191,7 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
                 "s_out": round(sg["out"][0] + (a_c - sg["src"][0]), 4),
                 "e_out": round(sg["out"][0] + (max(b_c, a_c) - sg["src"][0]), 4),
                 "piece": r["n"], "seg": sg["k"], "sp": None, "filler": False, "hidden": False,
-                "omitted": False, "removed": False, "_after": after})
+                "omitted": False, "removed": False, "_after": after, "_s0": round(s, 4)})
         meta.append({"n": n, "after": after, "tokens": [t for t, _a, _b in toks],
                      "src": [round(s, 4), round(e, 4)], "piece": r["n"]})
     if not extra:
@@ -1203,17 +1203,32 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
         while k < len(words) and words[k]["piece"] == pn:
             block.append(words[k])
             k += 1
+        runs: dict = {}
         for tok in extra.pop(pn, []):
-            # time order, and never before the word it follows. On a tie a transcript word
-            # comes after the insert ("after" says where it goes: the transcript folded the
-            # inserted speech into that word's start); an inserted word placed earlier stays first.
+            # time order, and never before the word it follows. A transcript word that starts
+            # with the insert comes after all of it ("after" says where it goes: the transcript
+            # folded the inserted speech into that word's start); an inserted word placed earlier
+            # stays first.
             pos = 0
             for j, w in enumerate(block):
-                if (w.get("i") == tok["_after"] or w["s_src"] < tok["s_src"] - 1e-6
+                if (w.get("i") == tok["_after"]
+                        or (w["s_src"] < tok["s_src"] - 1e-6 and abs(w["s_src"] - tok["_s0"]) > 1e-6)
                         or (w.get("i") is None and w["s_src"] <= tok["s_src"])):
                     pos = j + 1
-            tok = {key: v for key, v in tok.items() if key != "_after"}
+            run = runs.setdefault(tok["ins"], {"after": tok["_after"], "s0": tok["_s0"],
+                                               "seg": tok["seg"], "end": tok["e_out"]})
+            run["end"] = max(run["end"], tok["e_out"])
+            tok = {key: v for key, v in tok.items() if key not in ("_after", "_s0")}
             block.insert(pos, tok)
+        # That folded word is heard once the insert ends, so its caption starts there (the
+        # captions play words in time order: at its transcript start it would light first).
+        for run in runs.values():
+            for w in block:
+                if (w.get("i") is not None and w["i"] != run["after"] and not w.get("edge")
+                        and w.get("s_out") is not None and w.get("seg") == run["seg"]
+                        and abs(w["s_src"] - run["s0"]) <= 1e-6):
+                    w["s_out"] = max(w["s_out"], run["end"])
+                    w["e_out"] = max(w["e_out"], w["s_out"])
         out.extend(block)
     return out, meta
 

@@ -178,7 +178,8 @@ minute). Short-form pages are much shorter by design: two to four words read in 
 The `.srt` sidecar follows the broadcast limits instead of the burned paging: every visible word
 (including the ones spoken under the hook card), natural case (the clip's first word and the
 first word of a piece that follows a sentence end take a capital, so a piece cut in mid-sentence
-does not open its cue in lower case), at most two lines of 42
+does not open its cue in lower case; a word that starts with a number, such as "3pm", is left as
+it is), at most two lines of 42
 characters and 7 s of speech per cue (a cue stays up to 0.4 s after its last word, so it can
 last 7.4 s), broken at sentence and clause ends. Cues also break at every join
 of kind piece, omit or dip (a cue never runs across a cut), and every cue lies inside the file:
