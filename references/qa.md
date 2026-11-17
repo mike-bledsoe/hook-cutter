@@ -166,13 +166,16 @@ unnoticed. Re-plan and check L10 and L18, then the seam sheet.
 
 L15 `unworded_audio` and L19 mean the clip holds sound the transcript has no words for: a laugh,
 music, or speech the recogniser missed. You cannot listen, so ask the recogniser about that
-stretch alone. Cut it out of the source (`P/source.<ext>`, source seconds) with a little margin
-and transcribe the snippet as a scratch clip (an id that is not in clips.json):
+stretch alone with `hc listen`. It cuts the slice into a temporary folder outside P, transcribes
+it with the transcript's backend, model, language and glossary, prints each word with its times
+and probability, and leaves nothing in P (no `cache/`, no `transcripts/`), so a read-only
+reviewer can run it too. Give source seconds, or `--render CLIP` and output seconds to hear the
+clip's vertical render; the words come back on the clock you gave:
 
 ```
-ffmpeg -ss 132.4 -to 133.8 -i P/source.mp4 -vn P/cache/scratch-a.wav
-hc transcribe P --file cache/scratch-a.wav --clip scratch-a
-hc words P 0 20 --clip scratch-a
+hc listen P 132.2 134.0                            # source seconds
+hc listen P 9.6 13.9 --render c01-some-id          # the clip's vertical render, output seconds
+hc listen P 132.2 134.0 --backend faster-whisper   # a second opinion from the other engine
 ```
 
 - No words, or only a filler: it is a laugh, a breath or room sound. Keep it or cut it as the
@@ -180,12 +183,17 @@ hc words P 0 20 --clip scratch-a
 - Words: it is speech the transcript missed, and without help it plays with no caption (G5
   reports it as extra words, G10 as uncaptioned voiced audio). Caption it with the clip key
   `insert` (`spec.md`): the words exactly as heard, after the transcript word they follow, with
-  the source seconds they are spoken in. If the words are not clear enough to write down
-  verbatim, move the piece edge so the stretch is not in the clip.
+  the source seconds they are spoken in (the times a source slice prints). If the words are not
+  clear enough to write down verbatim, move the piece edge so the stretch is not in the clip.
 
+Start and end every slice in a pause. A slice cut inside a word makes the recogniser drop the
+words at that edge or invent some, so `hc listen` warns when START or END falls inside voiced
+audio, names the nearest quiet edges outside the slice (0.2 s into the pause next to the speech)
+and prints the command that re-runs it from them; read the words at a warned edge as unsure.
 Slices shorter than about a second transcribe poorly: take 0.2 s of margin on each side, and
 when the slice comes back empty but the level is clearly speech (`hc peek` shows a moving
-mouth), try a slightly longer one before deciding. Delete `P/transcripts/scratch-a.*` when done.
+mouth), try a slightly longer one before deciding. A slice is at most 120 s; `--json` gives the
+words, both edges and the warnings as JSON.
 
 ## Rules
 

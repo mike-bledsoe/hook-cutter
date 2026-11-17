@@ -26,6 +26,7 @@ COMMANDS = {
     "find": ("find", "cmd_find"),
     "words": ("find", "cmd_words"),
     "peek": ("sheets", "cmd_peek"),
+    "listen": ("listen", "cmd_listen"),
     "shots": ("shots", "cmd_shots"),
     "plan": ("plan", "cmd_plan"),
     "render": ("render", "cmd_render"),
@@ -39,7 +40,7 @@ COMMANDS = {
 }
 # Commands that read the source media through source.json: they stop when the file changed
 # since ingest (ingest, status, find, words, export, doctor and test never decode it).
-SOURCE_BOUND = ("transcribe", "shots", "peek", "plan", "render", "cover", "qa", "all")
+SOURCE_BOUND = ("transcribe", "shots", "peek", "listen", "plan", "render", "cover", "qa", "all")
 # Frames of slack when a cover time is floored to its frame. Must stay equal to
 # cover_frames.FRAME_TOL (hc cover floors with it); kept as a copy here so `hc status` does
 # not import the numpy-bearing cover modules. tests/test_codex_fg.py pins the two together.
@@ -168,6 +169,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--n", type=int, default=12)
     sp.add_argument("--file", default=None, metavar="PATH")
 
+    sp = add("listen", "transcribe START..END on its own in a temporary folder (nothing is "
+                       "written into P); warns when an edge cuts into speech")
+    project(sp)
+    sp.add_argument("start", type=_time, metavar="START",
+                    help="source seconds, or output seconds with --render ([h:]mm:ss[.ff] too)")
+    sp.add_argument("end", type=_time, metavar="END")
+    sp.add_argument("--render", default=None, metavar="CLIP",
+                    help="slice the clip's vertical render (output times) instead of the source")
+    sp.add_argument("--backend", default=None, choices=("auto", "mlx", "faster-whisper", "whispercpp"),
+                    help="default: the backend the transcript was made with")
+    sp.add_argument("--model", default=None, help="default: the transcript's model")
+    sp.add_argument("--json", action="store_true", help="machine-readable output")
+
     sp = add("shots", "shot boundaries + faces + framing proposal")
     project(sp)
     clips(sp)
@@ -258,9 +272,10 @@ def _require_source_current(args: argparse.Namespace) -> None:
     source.json's fingerprint, duration, stream layout and picture facts describe that file,
     and the transcript, plans, cached segments and renders were made from it, so a file
     replaced at the same path must be ingested again first (a hard stop, not a cache key).
-    Skipped for ``--file`` (a caption-only transcript, a peek at a rendered file) and when
-    every clip named is caption-only: those read their own file, which is checked live."""
-    if args.cmd not in SOURCE_BOUND or getattr(args, "file", None):
+    Skipped for ``--file`` (a caption-only transcript, a peek at a rendered file), for
+    ``listen --render`` (a slice of a rendered file) and when every clip named is caption-only:
+    those read their own file, which is checked live."""
+    if args.cmd not in SOURCE_BOUND or getattr(args, "file", None) or getattr(args, "render", None):
         return
     project = getattr(args, "project", None)
     if not project:

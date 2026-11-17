@@ -44,6 +44,7 @@ DOCUMENTED_CLI = {
     "find": {"--near", "--max", "--clip"},
     "words": {"--clip"},
     "peek": {"--n", "--file"},
+    "listen": {"--render", "--backend", "--model", "--json"},
     "shots": {"--range"},
     "plan": {"--quiet"},
     "render": {"--styles", "--formats", "--force"},

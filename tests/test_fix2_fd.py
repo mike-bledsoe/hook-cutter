@@ -828,7 +828,7 @@ class DocsSayWhatTheToolDoes(unittest.TestCase):
                  "do not put a line that needs captions under the card")
 
     def test_unworded_sound_can_be_checked_without_ears(self):
-        self.has("references/qa.md", "You cannot listen", "hc transcribe P --file cache/scratch-a.wav --clip scratch-a",
+        self.has("references/qa.md", "You cannot listen", "hc listen P 132.2 134.0",
                  "Caption it with the clip key `insert`")
 
     def test_piece_split_for_a_protected_pause(self):
