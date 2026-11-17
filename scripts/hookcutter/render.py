@@ -539,7 +539,9 @@ def _clamp(v, lo, hi, default):
 
 
 def measure_loudness(paths: list, cache: Path) -> dict:
-    """loudnorm first pass over the concatenated audio (cached json)."""
+    """loudnorm first pass over the concatenated audio (cached json), plus the pre-gain and
+    limiter fitted when the audio is too peaky for one linear gain (`limiter`), or the reason
+    none was (`limiter_skipped`); see _fit_limiter."""
     if cache.exists():
         try:
             return env.read_json(cache)
@@ -612,7 +614,9 @@ def _fit_limiter(ins: list, prefix: str, meas: dict):
     {"gain_db", "ceiling_db", "reduction_db", "passes", "measured" (loudnorm's measurement
     after the limiter)}, or {"skipped": why} when no fit within LIMIT_MAX_DB is found. Limiting
     takes some loudness off with the peaks, so the gain is refined from fresh measurements (a
-    secant step on gain vs loudness), at most LIMIT_TRIES passes."""
+    secant step on gain vs loudness), at most LIMIT_TRIES passes. A step past the gain that asks
+    LIMIT_MAX_DB of the limiter is clamped to that gain, and the peaks are called too much for
+    the limiter only once that gain has been measured and failed."""
     i_t, tp_t, lra_t = LOUDNORM
     mi, mtp, mlra = _ln_args(meas)
     if mtp + (i_t - mi) <= tp_t:
@@ -620,21 +624,24 @@ def _fit_limiter(ins: list, prefix: str, meas: dict):
     if mlra > lra_t:
         return {"skipped": "the loudness range %.1f LU is wider than %g LU, so a limiter cannot "
                            "make the linear step possible" % (mlra, lra_t)}
-    gain = float("%.2f" % (i_t - mi))
+    cap = float("%.2f" % (LIMIT_MAX_DB + LIMIT_CEILING - mtp))
+    gain = min(float("%.2f" % (i_t - mi)), cap)
     tried = []
     for _ in range(LIMIT_TRIES):
-        reduction = mtp + gain - LIMIT_CEILING
-        if reduction > LIMIT_MAX_DB:
-            return {"skipped": "the peaks would need %.1f dB of limiting (more than %g)"
-                               % (reduction, LIMIT_MAX_DB)}
         m2 = _loudnorm_pass(ins, prefix, _limiter_chain(gain))
         i2, tp2, lra2 = _ln_args(m2)
         if loudnorm_linear(m2) and tp2 + (i_t - i2) <= LIMIT_PEAK:
-            return {"gain_db": gain, "ceiling_db": LIMIT_CEILING, "reduction_db": round(reduction, 2),
+            return {"gain_db": gain, "ceiling_db": LIMIT_CEILING,
+                    "reduction_db": round(mtp + gain - LIMIT_CEILING, 2),
                     "passes": len(tried) + 1, "measured": m2}
         if lra2 > lra_t:
             return {"skipped": "after limiting, the loudness range %.1f LU is still wider than %g LU"
                                % (lra2, lra_t)}
+        if gain >= cap:
+            return {"skipped": "the peaks would need more than %g dB of limiting: with %g dB the "
+                               "limited audio reaches %.2f LUFS at a %.2f dBTP peak, and one linear "
+                               "step to %g LUFS needs %.2f LUFS or more"
+                               % (LIMIT_MAX_DB, LIMIT_MAX_DB, i2, tp2, i_t, i_t + tp2 - LIMIT_PEAK)}
         tried.append((gain, i2))
         slope = 1.0
         if len(tried) > 1 and tried[-1][0] != tried[-2][0]:
@@ -643,7 +650,7 @@ def _fit_limiter(ins: list, prefix: str, meas: dict):
         if nxt <= gain:
             return {"skipped": "the limiter's output peaks at %.1f dBTP, over its %g dBFS ceiling"
                                % (tp2, LIMIT_CEILING)}
-        gain = nxt
+        gain = min(nxt, cap)
     return {"skipped": "no pre-gain within %d passes brought the limited audio to %g LUFS"
                        % (LIMIT_TRIES, i_t)}
 
