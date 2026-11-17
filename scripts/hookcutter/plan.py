@@ -1957,11 +1957,17 @@ def _flag_msg(f: dict, a, b, t_src=None) -> str:
         return (f"low-confidence transcript word{w}{p} at words {a}-{b}: check it and add a "
                 "\"fix\" if it is wrong")
     if kind == "unworded_audio":
-        d = float(f.get("e", 0.0)) - float(f.get("s", 0.0))
-        return (f"{d:.1f} s of sound with no words at src {specmod.fmt_time(f.get('s', 0.0))} is "
-                "inside the clip (laughter, music or speech ASR missed): transcribe that stretch on "
-                "its own before keeping it (hc transcribe P --file SNIPPET --clip SCRATCH-ID) and "
-                "caption speech the transcript missed with \"insert\"")
+        from .listen import LISTEN_MARGIN, LISTEN_MAX
+        fs, fe = float(f.get("s", 0.0)), float(f.get("e", 0.0))
+        lo, hi = max(0.0, fs - LISTEN_MARGIN), fe + LISTEN_MARGIN
+        how = f"hc listen P {lo:.2f} {hi:.2f}"
+        if hi - lo > LISTEN_MAX:
+            how = (f"hc listen P {lo:.2f} {lo + LISTEN_MAX:.2f} and on to {hi:.2f}, in slices of "
+                   f"at most {LISTEN_MAX:.0f} s that meet in a pause")
+        return (f"{fe - fs:.1f} s of sound with no words at src {specmod.fmt_time(fs)} is "
+                "inside the clip (laughter, music or speech ASR missed): transcribe that stretch "
+                f"on its own before keeping it ({how}, which writes nothing into P) and caption "
+                "speech the transcript missed with \"insert\"")
     if kind == "dropout":
         n = f.get("vtt_words")
         n = len(n) if isinstance(n, (list, tuple)) else n

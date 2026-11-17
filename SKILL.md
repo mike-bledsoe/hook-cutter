@@ -87,10 +87,9 @@ to voiced stretches that got no words. Flags in `transcript.md`: `unworded_audio
 (`<<... s of sound with no words>>` lines), `false_start` (two attempts at a phrase, a visible
 restart such as "I was, I was" included), `timing_uncertain` (a start under a laugh or another
 voice), `speaker_uncertain`, `no_audio`. Check them with `hc words` before keeping that audio
-(`hooks.md` section 1). You cannot listen: `qa.md` ("Checking sound that has no words") shows
-how to transcribe one stretch alone; clip key `insert` captions speech the transcript missed.
-`hc transcribe P --retime` re-times without ASR (indices stay valid). `HOOKCUTTER_DEVICE=cpu`
-forces faster-whisper onto the CPU.
+(`hooks.md` section 1). You cannot listen: `hc listen P START END` transcribes one stretch alone
+(`qa.md`); `insert` captions speech the transcript missed. `hc transcribe P --retime` re-times
+without ASR (indices stay valid). `HOOKCUTTER_DEVICE=cpu` forces faster-whisper onto the CPU.
 
 ### 3. Mine the moments
 
@@ -232,6 +231,7 @@ hc status P                        # one line per clip: plan / render / cover / 
 | `hc find P "phrase" [--near MM:SS] [--max N] [--clip ID]` | phrase to word indices and times |
 | `hc words P A B [--clip ID]` | words A..B with times, gaps, filler flags, speakers |
 | `hc peek P START END [--n 12] [--file PATH]` | contact sheet of a source range or a rendered file |
+| `hc listen P START END [--render CLIP] [--backend auto\|mlx\|faster-whisper\|whispercpp] [--model M] [--json]` | transcribe one stretch alone in a temp folder, writing nothing into P: words on the source clock (`--render`: the clip's vertical render, output clock); warns when an edge cuts into speech |
 | `hc shots P CLIP...` / `hc shots P --range START END` | shots, faces, framing proposal and sheet |
 | `hc plan P [CLIP...] [--quiet]` | validate and plan; prints table and lints |
 | `hc render P [CLIP...] [--styles a,b] [--formats vertical,landscape] [--force]` | render clips and sheets |
