@@ -28,7 +28,7 @@ PASS, WARN, FAIL, SKIP = "PASS", "WARN", "FAIL", "SKIPPED"
 REQUIRED_FILTERS = ("concat", "loudnorm", "ebur128", "overlay", "trim", "atrim", "apad",
                     "aresample", "sendcmd", "crop", "scale", "boxblur", "blackdetect",
                     "freezedetect", "fps", "setsar", "eq", "setpts", "asetpts", "afade", "volume",
-                    "pan", "astats")
+                    "pan", "astats", "alimiter")
 OPTIONAL_FILTERS = (("zscale", "HDR (HLG/PQ) tone-mapping to SDR"),)
 REQUIRED_ENCODERS = ("libx264", "aac", "pcm_s24le")
 DECODER_GROUPS = (("H.264", ("h264",)), ("HEVC", ("hevc",)), ("VP9", ("vp9", "libvpx-vp9")),
