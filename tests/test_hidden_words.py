@@ -92,7 +92,8 @@ class TestFoldedWord(unittest.TestCase):
         self.assertEqual(len(x), 1, plan["lints"])
         self.assertEqual(x[0]["level"], "WARN")
         msg = x[0]["msg"]
-        for part in ("'a'", "word 8", "0:03.80", "0.45 s", "'terminal'", "slice-transcribe"):
+        for part in ("'a'", "word 8", "0:03.80", "0.45 s", "'terminal'", "slice-transcribe",
+                     "its caption"):
             self.assertIn(part, msg)
         self.assertAlmostEqual(x[0]["at_out"], P.out_time(plan, 3.8), places=2)
 
@@ -114,11 +115,53 @@ class TestFoldedWord(unittest.TestCase):
         plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}], "fix": {"8": "a"}})
         self.assertEqual(l21(plan), [], plan["lints"])
 
+    def test_an_insert_over_the_word_settles_it(self):
+        # the editor typed what the slice heard inside the word's time
+        words = folded()
+        piece = [{"words": [0, len(words) - 1]}]
+        ins = {"after": 7, "text": "a, I'm in", "src": [3.8, 4.0]}
+        plan = build(words, {"pieces": piece, "insert": [ins]})
+        self.assertEqual(l21(plan), [], plan["lints"])
+        # an insert somewhere else answers nothing here
+        ins = {"after": 10, "text": "well,", "src": [5.1, 5.2]}
+        plan = build(words, {"pieces": piece, "insert": [ins]})
+        self.assertEqual(len(l21(plan)), 1, plan["lints"])
+
+    def test_an_in_edge_past_the_first_attempt_still_needs_the_heard_text(self):
+        # editing.md rule 6: open on the folded word and push the in-edge past the first
+        # attempt. What is left can still hold more than the token's text (a restart stamped
+        # 'built' as "I did a, I built": the edge past "I did a," leaves "I built"), so the
+        # edge alone does not settle it; a fix saying what is heard from the edge on does.
+        words = folded()
+        last = len(words) - 1
+        piece = [{"words": [8, last], "in_offset": 6}]
+        plan = build(words, {"pieces": piece})
+        self.assertGreater(plan["segments"][0]["src"][0], 3.8)
+        self.assertEqual(len(l21(plan)), 1, plan["lints"])
+        plan = build(words, {"pieces": piece, "fix": {"8": "I'm in a"}})
+        self.assertEqual(l21(plan), [], plan["lints"])
+
+    def test_a_flagged_word_is_still_checked(self):
+        # a false_start flag can name one restart while the word holds more: L15 and L21 both
+        words = folded()
+        flag = {"kind": "false_start", "a": 8, "b": 8, "s": 3.8, "e": 4.0}
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}]}, flags=[flag])
+        self.assertTrue([y for y in plan["lints"] if y["id"] == "L15"], plan["lints"])
+        self.assertEqual(len(l21(plan)), 1, plan["lints"])
+
     def test_word_just_outside_the_in_edge_is_checked(self):
         # the piece opens on 'terminal'; the folded 'a' right before the edge is still named
         words = folded()
         plan = build(words, {"pieces": [{"words": [9, len(words) - 1]}]})
-        self.assertEqual(len(l21(plan)), 1, plan["lints"])
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        # the word is not in the clip, so it has no caption to get wrong
+        self.assertNotIn("caption", x[0]["msg"])
+        # nor has a word the clip omits
+        plan = build(words, {"pieces": [{"words": [0, len(words) - 1]}], "omit": [8]})
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        self.assertNotIn("caption", x[0]["msg"])
         # a folded word far from every edge is not this clip's business
         plan = build(words, {"pieces": [{"words": [12, len(words) - 1]}]})
         self.assertEqual(l21(plan), [], plan["lints"])
@@ -216,9 +259,53 @@ class TestWordlessSound(unittest.TestCase):
         end = build(words, clip)["segments"][-1]["src"][1]
         near = build(words, clip, extra=[(end + 0.05, end + 0.45, -26.0)])
         self.assertEqual(near["segments"][-1]["src"][1], end)
-        self.assertEqual(len(l21(near)), 1, near["lints"])
+        x = l21(near)
+        self.assertEqual(len(x), 1, near["lints"])
+        # the slice it asks for holds the sound, though no word follows it
+        self.assertIn(f"-{S.fmt_time(end + 0.45)} ", x[0]["msg"])
         far = build(words, clip, extra=[(end + 0.8, end + 1.2, -26.0)])
         self.assertEqual(l21(far), [], far["lints"])
+
+    def test_a_long_stretch_partly_outside_the_clip_says_how_much_is_inside(self):
+        # 1.6 s of sound, 1.3 s of it inside a time piece: L19 measures only the inside part
+        words = seq(["It's", "not", "exactly", "what", "I", "expected", "it", "to", "be."],
+                    start=1.0)
+        plan = build(words, {"pieces": [{"time_src": [0.9, 6.0]}]}, extra=[(4.7, 6.3, -26.0)])
+        self.assertEqual(plan["segments"][-1]["src"][1], 6.0)
+        self.assertFalse([y for y in plan["lints"] if y["id"] == "L19"], plan["lints"])
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        msg = x[0]["msg"]
+        self.assertIn("1.6 s of sound", msg)
+        self.assertIn("1.30 s of it inside the clip", msg)
+        self.assertNotIn("L19 starts", msg)
+        self.assertIn("0:04.20-0:06.30", msg)
+
+
+class TestWhereItPoints(unittest.TestCase):
+    """at_out for a stretch outside every segment: the nearest edge in the source, also when a
+    later passage plays first (a cold open)."""
+
+    WORDS = seq(["One", "two", "three", "four", "five.", "Six", "seven", "eight", "nine",
+                 "ten."], start=2.0)
+    COLD = {"pieces": [{"words": [5, 9]}, {"words": [0, 4]}]}
+
+    def test_sound_before_the_in_edge_of_the_second_piece(self):
+        plan = build(self.WORDS, self.COLD, extra=[(1.35, 1.8, -26.0)])
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        second = plan["segments"][1]
+        self.assertLess(second["src"][0], plan["segments"][0]["src"][0])
+        self.assertAlmostEqual(x[0]["at_out"], second["out"][0], places=3)
+
+    def test_sound_past_the_out_edge_of_the_cold_open(self):
+        end = build(self.WORDS, self.COLD)["segments"][0]["src"][1]
+        plan = build(self.WORDS, self.COLD, extra=[(end + 0.05, end + 0.45, -26.0)])
+        x = l21(plan)
+        self.assertEqual(len(x), 1, plan["lints"])
+        first = plan["segments"][0]
+        self.assertAlmostEqual(x[0]["at_out"], first["out"][1], places=3)
+        self.assertLess(x[0]["at_out"], plan["duration_out"] - 1.0)
 
 
 class TestCleanSpeech(unittest.TestCase):
