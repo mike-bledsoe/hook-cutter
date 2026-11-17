@@ -337,6 +337,17 @@ def _loud_seconds(E: Any, a: float, b: float, within: float) -> float:
     return float(np.count_nonzero(db - sp >= -within)) * E.hop
 
 
+def speech_share(E: Any, a: float, b: float, within: float = ABUT_DB) -> float:
+    """Share (0 to 1) of the frames of [a, b] whose level lies within `within` dB of the local
+    speech level (90th percentile, +/- 5 s): near 1 for a word, near 0 for a breath or room
+    sound, which floor-relative voicing (floor + 10 dB) cannot tell apart on a quiet recording.
+    0.0 when [a, b] holds no frame of the track."""
+    j0, j1 = _span(E, a, b - 1e-9)
+    if j1 <= j0:
+        return 0.0
+    return _loud_seconds(E, a, b, within) / ((j1 - j0) * E.hop)
+
+
 def unvoiced_words(words: Sequence[dict], E: Any, pad: float = GATE_PAD) -> list[int]:
     """Indices of words with no frame above floor + 10 dB inside [s - pad, e + pad]. A word
     that lies outside the track (beyond its end, before its start) is never listed: the track

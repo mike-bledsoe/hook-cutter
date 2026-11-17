@@ -227,7 +227,8 @@ piece later. Fillers ("um", "uh") are removed by tightening automatically.
 
 A false start can hide inside one transcript word: "and after a... after about a decade" may be
 stored as three words, the second "after" folded into "about" (lint L15 `false_start` names such
-words). No index separates the two attempts, so `omit` and `words[0]` cannot cut between them.
+words; L21 names a word that sounds too long for its text when transcribe did not flag it). No
+index separates the two attempts, so `omit` and `words[0]` cannot cut between them.
 Start the piece on the folded word and push its in-edge past the first attempt with
 `in_offset`: whole output frames, up to 60 (two seconds at 30 fps), + is later. Read the source
 times in `hc words`, convert the gap to frames, re-plan, and check the first caption page and

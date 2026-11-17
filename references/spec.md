@@ -411,6 +411,8 @@ the restart, the flag is settled.
 Remedies: a false start at a piece's first word is skipped with `in_offset` (up to 60 frames);
 an uncertain word start is checked on the render (QA G10 names tokens that light early) and, if
 wrong, hidden with `fix` while the next word carries its text.
+Not every fold or dropped word gets a flag: plan lint L21 reads the audio around the clip for a
+word that sounds too long for its text and for short stretches of speech with no words (`qa.md`).
 
 ## shots json
 

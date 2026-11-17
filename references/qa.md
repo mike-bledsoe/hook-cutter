@@ -151,6 +151,7 @@ render.
 | L18 | WARN | a segment opens on more than 0.35 s of silence (0.25 s at 0:00) before its first word | start the piece later, or `in_offset` |
 | L19 | FAIL or WARN | 3.0 s or more of voiced audio inside the clip with no transcript words and no `unworded_audio` flag (FAIL); 1.5 s or more (WARN) | re-run `hc transcribe P` (it re-listens to gaps), or keep that stretch out of the clip |
 | L20 | WARN | the hook card sets smaller than 1.3 times the caption size | shorten the hook lines to the length the message suggests |
+| L21 | WARN | speech the transcript may have folded into a neighbouring word or dropped, which no transcript flag marks, inside the clip and up to 0.5 s outside each kept stretch (where an edge decides what is heard). Read from the audio level and judged against the speech around it, so a breath on a quiet recording does not count: (a) a word that sounds longer than its text takes to say (0.30 s plus 0.06 s per letter, a digit counting three) and runs straight into the next word, such as a restart stamped as one word ("I'm in a, I'm in a terminal" as one 0.40 s "a"); a drawn word before a pause is ordinary speech; (b) a gap of 0.2 s or more between two words that sounds at speech level across 80% of it (a filler with no word, or a mis-timed edge); (c) 0.3 s up to L19's 1.5 s of sound with no words, at speech level. A stretch L15 already names is not repeated. On interview audio about half of these are a folded or mis-timed word; the rest are drawn or emphatic speech, which a slice settles at once | slice-transcribe the stretch it names ("Checking sound that has no words" below) before you trust the words. Words the transcript lacks: `fix` on the word that holds them, with what is heard (a fold), or `insert` (a gap); a restart at a piece's first word: `in_offset` (`editing.md` rule 6); a word stamped too early: hide it with `fix` while the next word carries its text. An `insert` over the stretch, or a `fix` on the word (for a gap or wordless sound: on the word after it) settles the WARN; nothing more heard: say so in one line |
 
 ### An extra word at a seam
 
@@ -165,9 +166,10 @@ unnoticed. Re-plan and check L10 and L18, then the seam sheet.
 ### Checking sound that has no words
 
 L15 `unworded_audio` and L19 mean the clip holds sound the transcript has no words for: a laugh,
-music, or speech the recogniser missed. You cannot listen, so ask the recogniser about that
-stretch alone. Cut it out of the source (`P/source.<ext>`, source seconds) with a little margin
-and transcribe the snippet as a scratch clip (an id that is not in clips.json):
+music, or speech the recogniser missed. L21 means the same for shorter stretches, or a word that
+sounds longer than its text (words folded into it). You cannot listen, so ask the recogniser
+about that stretch alone. Cut it out of the source (`P/source.<ext>`, source seconds) with a
+little margin and transcribe the snippet as a scratch clip (an id that is not in clips.json):
 
 ```
 ffmpeg -ss 132.4 -to 133.8 -i P/source.mp4 -vn P/cache/scratch-a.wav
@@ -182,6 +184,9 @@ hc words P 0 20 --clip scratch-a
   `insert` (`spec.md`): the words exactly as heard, after the transcript word they follow, with
   the source seconds they are spoken in. If the words are not clear enough to write down
   verbatim, move the piece edge so the stretch is not in the clip.
+- More words inside one word's time than the transcript has (an L21 fold): caption them with
+  `fix` on that word, exactly as heard ("I'm in a" on the word "a"), or step over a restart at
+  the piece's first word with `in_offset` (`editing.md` rule 6).
 
 Slices shorter than about a second transcribe poorly: take 0.2 s of margin on each side, and
 when the slice comes back empty but the level is clearly speech (`hc peek` shows a moving
