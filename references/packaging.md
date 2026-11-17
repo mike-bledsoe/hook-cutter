@@ -77,7 +77,8 @@ pick and the sheet, and when you force one with `cover.at_out` the cover json wa
 - The right speaker: the person who owns the claim on the cover. A host's face over a guest's
   claim misattributes it. When the transcript has speaker labels, `hc cover` only scores frames
   where the clip's `speaker` is talking, and QA G12 warns when the chosen frame belongs to
-  someone else.
+  someone else. Without labels, name the person who speaks each other piece with the piece's
+  `speaker` (`spec.md`): the automatic pick then skips those pieces.
 - Head-and-shoulders scale beats a wide shot.
 - Record the choice as `cover.at_out` (output seconds) or run `hc cover P CLIP --at SECONDS`
   (`--at` also takes `0:12.4`).

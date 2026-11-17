@@ -33,7 +33,7 @@ CLIP_KEYS = {"ledger", "title", "speaker", "kind", "source_file", "pieces", "omi
              "transcript_sha"}
 LEGACY_CLIP_KEYS = {"spans"}
 PIECE_KEYS = {"words", "time_src", "role", "join", "expect", "hold_after", "gain_db",
-              "tighten", "chapter", "in_offset", "out_offset"}
+              "tighten", "chapter", "in_offset", "out_offset", "speaker"}
 HOOK_KEYS = {"lines", "dur", "text"}
 COVER_KEYS = {"headline", "at_out", "shift", "lockup"}
 FRAMING_KEYS = {"at_src", "mode", "x", "y", "crop", "reaction", "rect"}
@@ -270,8 +270,25 @@ def normalize_spec(raw) -> dict:
             if isinstance(cid, str) and cid.startswith("_"):
                 continue                 # a comment key ("_note", a parked "_c02-off" clip)
             clips[cid] = normalize_clip(cid, entry, defaults)
+    if speakers:
+        for cid, c in clips.items():
+            _check_piece_speakers(c, cid, speakers)
     return {"version": 1, "transcript_sha": tsha, "defaults": defaults, "speakers": speakers,
             "clips": clips, "_issues": issues}
+
+
+def _check_piece_speakers(clip: dict, cid, speakers: dict) -> None:
+    """L01 WARN for a piece "speaker" the (non-empty) top-level speakers map has no entry for:
+    QA G16 cannot check its framing and speaker-follow framing will not use it. With no map
+    any label is accepted."""
+    iss = _Issues(clip.setdefault("_issues", []), cid)
+    for n, p in enumerate(clip.get("pieces") or []):
+        lab = p.get("speaker")
+        if lab and lab not in speakers:
+            have = ", ".join(repr(k) for k in speakers)
+            iss.warn(f"pieces[{n}].speaker {lab!r} is not in \"speakers\" ({have}): add "
+                     f"{{\"{lab}\": {{\"x\": ...}}}} (x from the shots sheet) so framing can follow "
+                     "it and QA G16 can check it")
 
 
 def _norm_speakers(v, iss: _Issues) -> dict:
@@ -484,6 +501,13 @@ def _norm_piece(raw, n: int, iss: _Issues) -> dict:
             p["chapter"] = raw["chapter"]
         else:
             iss.fail(f"{where}.chapter must be a string")
+    if raw.get("speaker") is not None:
+        # set only when given, so a piece without it hashes as it always did
+        if isinstance(raw["speaker"], str) and raw["speaker"].strip():
+            p["speaker"] = raw["speaker"]
+        else:
+            iss.fail(f"{where}.speaker must be a speaker label (a non-empty string, as in "
+                     "\"speakers\" or the clip's \"speaker\")")
     for key in ("in_offset", "out_offset"):
         if raw.get(key) is None:
             continue
@@ -1075,7 +1099,26 @@ def validate(spec: dict, transcript: dict | None = None, source: dict | None = N
                                 f"{fmt_time(p['time_src'][1])}, after the source end "
                                 f"{fmt_time(dur)}", cid))
             _check_expect(p, n, clip, cid, words, out)
+            _check_piece_label(p, n, cid, words, out)
     return out
+
+
+def _check_piece_label(p, n, cid, words, out):
+    """L01 WARN when a piece names a speaker but some of its words carry another transcript
+    label: transcript labels win, so the key names only the unlabelled words."""
+    lab = p.get("speaker")
+    if not lab:
+        return
+    other = {}
+    for k in piece_word_indices(p, words):
+        sp = words[k].get("sp")
+        if sp and sp != lab:
+            other[sp] = other.get(sp, 0) + 1
+    if other:
+        said = ", ".join(f"{v} labelled {k!r}" for k, v in sorted(other.items()))
+        out.append(lint("L01", "WARN", f"pieces[{n}].speaker {lab!r}: the transcript labels some "
+                        f"of its words ({said}) and those labels win; the key names only the "
+                        "unlabelled words", cid))
 
 
 def sha_matches(tsha: str, transcript: dict) -> bool:
@@ -1113,18 +1156,22 @@ def _check_clip_pin(clip, cid, tr, out):
 
 
 def _check_speakers(spec: dict, transcript: dict) -> list:
-    """L01 WARN for speakers-map labels that no transcript word or clip speaker uses."""
+    """L01 WARN for speakers-map labels that no transcript word, clip speaker or piece speaker
+    uses."""
     smap = spec.get("speakers") or {}
     if not smap:
         return []
     known = {w.get("sp") for w in transcript.get("words") or [] if w.get("sp")}
     known |= {c.get("speaker") for c in spec["clips"].values() if c.get("speaker")}
+    known |= {p.get("speaker") for c in spec["clips"].values() for p in c.get("pieces") or []
+              if p.get("speaker")}
     out = []
     for label in smap:
         if label not in known:
             have = ", ".join(sorted(str(k) for k in known)) or "none (no --speakers-vtt labels)"
             out.append(lint("L01", "WARN", f"speakers label {label!r} matches no transcript "
-                            f"speaker or clip speaker (labels: {have}): framing will not use it"))
+                            f"speaker, clip speaker or piece speaker (labels: {have}): framing "
+                            "will not use it"))
     return out
 
 

@@ -864,7 +864,8 @@ def multi_face_lines(res: dict) -> list:
             if t["sp"] not in labs:
                 labs.append(t["sp"])
         tl = ", ".join("%s %s" % (env.fmt_time(t["at_src"], 1), t["sp"]) for t in inside) or \
-            "none (no speaker labels in the transcript: transcribe with --speakers-vtt)"
+            "none (no speaker labels in the transcript: transcribe with --speakers-vtt, or " \
+            "name who speaks each piece with the piece's \"speaker\" in clips.json)"
         if labs and all(lb in mapped for lb in labs):
             how = "the speakers map covers it: the proposal follows the turns."
         else:

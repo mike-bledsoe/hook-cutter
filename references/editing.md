@@ -382,8 +382,13 @@ face over another person's words for the whole clip.
    `{"mode": "letterbox", "rect": [x, y, w, h]}` while only that person talks (about 1.7x
    upscale for one tile of a 2-up call, where a crop needs about 5x). G16 judges a tile like a
    crop: the clip needs its `speaker` and that person's x in `speakers`, or the tile of a
-   multi-face shot fails as unlabeled.
-5. A deliberate cutaway to the listener gets `"reaction": true` on its mark.
+   multi-face shot fails as unlabeled. Unlabelled words count as the clip's `speaker`, so a
+   piece someone else speaks (the host's question or closing line in a guest's clip) gets
+   `"speaker": "<label>"` on the piece: G16 checks that piece against that person, framing
+   with a `speaker` mark follows the pieces, and the cover's automatic frame skips it.
+   Transcript labels, where there are any, still win.
+5. A deliberate cutaway to the listener gets `"reaction": true` on its mark. Never mark a piece
+   where the framed person is speaking as a reaction: name its `speaker` (step 4).
 
 QA G16 fails a render that frames someone other than the speaker for 1.5 s or more. Gallery
 recordings often carry black bars too: ingest measures them (`video.active_area`) and framing
@@ -424,6 +429,7 @@ garbled audio, and the rule above applies.
 | a group or wide shot | `{"at_src": "24:10.0", "mode": "letterbox"}` |
 | framing follows who talks (gallery, two-shot) | top-level `"speakers": {"Ann": {"x": 0.27}, "Ben": {"x": 0.75}}` |
 | one tile of a gallery | `{"at_src": "24:20.0", "mode": "letterbox", "rect": [0.5, 0.25, 0.5, 0.5]}` |
+| who speaks a piece (no speaker labels) | `"speaker": "Ann"` on that piece |
 | a deliberate listener cutaway | `"reaction": true` on that mark |
 | a stray syllable at a seam | `"in_offset": 2` (frames) on the piece, or `"out_offset": -2` |
 | skip a false start folded into the first word | `"in_offset": 17` on that piece (frames, up to 60) |

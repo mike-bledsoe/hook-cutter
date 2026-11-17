@@ -2513,29 +2513,36 @@ def framing_attribution(plan: dict, clip: dict, shots: dict, windows: list, spea
                 pass
         if not inside:
             reaction = bool(win.get("reaction")) or roles.get(wd.get("piece"), "") == "reaction"
-            bad.append((wd, label, reaction))
+            # no label of its own: the clip speaker was assumed (no transcript label, no piece key)
+            assumed = not wd.get("sp") or wd.get("sp_from") == "clip"
+            bad.append((wd, label, reaction, assumed))
     statuses, notes = [], []
     if unlabeled:
         statuses.append("FAIL")
         notes.append(f"FAIL multi-face crop with no speaker labels or clip speaker ({len(unlabeled)} word(s), "
-                     f"first at out {float(unlabeled[0]['s_out']):.2f}s): set the clip's \"speaker\"")
+                     f"first at out {float(unlabeled[0]['s_out']):.2f}s): set the clip's \"speaker\" "
+                     "(and a piece's \"speaker\" where someone else speaks)")
     for label, ws in no_x.items():
         statuses.append("FAIL")
         notes.append(f'FAIL multi-face shot framed on one face: set clips.json "speakers": {{"{label}": {{"x": ...}}}} '
                      f"(x from the shots sheet) so QA can check who is on screen ({len(ws)} word(s) of {label})")
     runs = []
-    for wd, label, reaction in bad:
+    for wd, label, reaction, assumed in bad:
         s, e = float(wd["s_out"]), float(wd["e_out"])
         if runs and runs[-1]["label"] == label and s - runs[-1]["e"] < G16_MERGE_GAP:
             r = runs[-1]
             r["e"] = max(r["e"], e)
             r["reaction"] = r["reaction"] and reaction
+            r["assumed"] = r["assumed"] and assumed
         else:
-            runs.append({"label": label, "s": s, "e": e, "reaction": reaction})
+            runs.append({"label": label, "s": s, "e": e, "reaction": reaction, "assumed": assumed})
     for r in runs:
         dur = r["e"] - r["s"]
         lvl = "FAIL" if dur >= G16_FAIL_S - 1e-9 and not r["reaction"] else "WARN"
         why = " (reaction shot)" if r["reaction"] and dur >= G16_FAIL_S else ""
+        if r["assumed"] and not r["reaction"]:
+            why = (" (no speaker label: these words count as the clip speaker; if the framed "
+                   "person speaks them, set \"speaker\" on that piece)")
         statuses.append(lvl)
         notes.append(f"{lvl} framed face is not {r['label']} for {dur:.1f}s at out {r['s']:.2f}s{why}")
     st = worst(statuses) if statuses else "PASS"
