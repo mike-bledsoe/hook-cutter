@@ -31,6 +31,7 @@ from . import env
 STEP = "listen"
 SAMPLE_RATE = 16000
 LISTEN_MAX = 120.0       # a slice is a short stretch: longer ones are hc transcribe's job
+LIMIT_EPS = 1e-6         # times are typed to two decimals: 9.80..129.80 is 120 s, not over it
 LISTEN_SHORT = 1.0       # slices shorter than this transcribe poorly (qa.md)
 CONTEXT = 20.0           # audio read either side of the slice for the floor (audio.FLOOR_RADIUS)
 EDGE_WIN = 0.02          # energy window around an edge, for the dB figure (plan.WIN_DB)
@@ -101,8 +102,13 @@ def _render_file(proj: Any, clip: str) -> Path:
     found = [p for p in folder.iterdir() if pat.match(p.name) and p.is_file()] \
         if folder.is_dir() else []
     if not found:
-        raise env.HCError("no vertical render of clip %s in %s. Run: hc render %s %s"
-                          % (clip, proj.rel(folder), shlex.quote(str(proj.root)), clip), code=1)
+        other = re.compile(r"^%s__landscape__[^.]+\.mp4$" % re.escape(clip))
+        land = folder.is_dir() and any(other.match(p.name) for p in folder.iterdir())
+        raise env.HCError("no vertical render of clip %s in %s%s: hc listen --render reads only "
+                          "the vertical render. Run: hc render %s %s --formats vertical, or slice "
+                          "the source (source seconds, no --render)"
+                          % (clip, proj.rel(folder), " (only a landscape one)" if land else "",
+                             shlex.quote(str(proj.root)), clip), code=1)
     found.sort(key=lambda p: (-p.stat().st_mtime, p.name))
     if len(found) > 1:
         env.log(STEP, "%s has %d vertical renders; listening to %s (every style has the same "
@@ -156,7 +162,7 @@ def listen(proj: Any, start: float, end: float, args: Any) -> dict:
     start, end = float(start), float(end)
     if end <= start:
         raise env.HCError("END must be after START (%.2f to %.2f)" % (start, end), code=1)
-    if end - start > LISTEN_MAX:
+    if end - start > LISTEN_MAX + LIMIT_EPS:
         raise env.HCError("a slice is at most %.0f s (this one is %.1f s): for a longer stretch "
                           "run hc transcribe" % (LISTEN_MAX, end - start), code=1)
     if clip:
@@ -221,7 +227,14 @@ def listen(proj: Any, start: float, end: float, args: Any) -> dict:
     qs, qe = edges["start"]["quiet"], edges["end"]["quiet"]
     rerun = None
     if qs is not None or qe is not None:
-        rerun = _rerun(proj, qs if qs is not None else start, qe if qe is not None else end, args)
+        ra, rb = qs if qs is not None else start, qe if qe is not None else end
+        if rb - ra > LISTEN_MAX + LIMIT_EPS:     # the quiet edges only widen it: hc listen
+            # would refuse that re-run, so none is printed
+            warnings.append("from the quiet edges the slice would be %.1f s, over the %.0f s a "
+                            "slice may be: listen to it as two slices that meet in a pause"
+                            % (rb - ra, LISTEN_MAX))
+        else:
+            rerun = _rerun(proj, ra, rb, args)
     return {"media": label, "clock": clock, "start": round(start, 3), "end": round(end, 3),
             "backend": concrete, "model": shown_model, "language": language or "auto",
             "words": out_words, "text": " ".join(w["w"] for w in out_words),

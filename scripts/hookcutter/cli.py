@@ -275,7 +275,8 @@ def _require_source_current(args: argparse.Namespace) -> None:
     Skipped for ``--file`` (a caption-only transcript, a peek at a rendered file), for
     ``listen --render`` (a slice of a rendered file) and when every clip named is caption-only:
     those read their own file, which is checked live."""
-    if args.cmd not in SOURCE_BOUND or getattr(args, "file", None) or getattr(args, "render", None):
+    if args.cmd not in SOURCE_BOUND or getattr(args, "file", None) \
+            or (args.cmd == "listen" and getattr(args, "render", None)):
         return
     project = getattr(args, "project", None)
     if not project:

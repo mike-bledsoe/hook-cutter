@@ -6,6 +6,7 @@ edges. Canned ASR: a stand-in backend hears the fixture's tone bursts, so no mod
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
@@ -29,6 +30,7 @@ import numpy as np  # noqa: E402
 
 import fixtures as F  # noqa: E402
 from hookcutter import cli, env, transcribe as T  # noqa: E402
+from hookcutter import plan as PL, spec as S  # noqa: E402
 from hookcutter.audio import EnergyTrack  # noqa: E402
 
 try:
@@ -43,6 +45,7 @@ WORDS = [("Hello", 1.0, 1.6), ("there", 2.4, 3.0), ("again.", 4.0, 4.5)]
 # shows up in the times.
 RENDER_WORDS = [("Short", 0.5, 1.0)]
 RENDER_NAME = "c01-test__vertical__clean.mp4"
+LANDSCAPE_NAME = "c02-land__landscape__clean.mp4"
 
 
 def setUpModule():
@@ -145,6 +148,7 @@ def make_listen_project(name):
     render = F.make_speech_fixture(TMP / "render-media", RENDER_WORDS, dur=3.0)
     (P / "renders").mkdir(exist_ok=True)
     shutil.copy2(str(render), str(P / "renders" / RENDER_NAME))
+    shutil.copy2(str(render), str(P / "renders" / LANDSCAPE_NAME))
     return P
 
 
@@ -282,6 +286,59 @@ class ListenCommandTest(unittest.TestCase):
         self.assertEqual(runner.calls, [], "a usage error must not run the recogniser")
         self.assertEqual(tree(self.P), before)
 
+    def test_missing_vertical_render_says_how_to_make_one(self):
+        """hc listen reads only the vertical render: a clip with only a landscape one, or none,
+        is told to render the vertical format (plain hc render renders the formats the spec asks
+        for, which may not include it) or to slice the source."""
+        with fake_backend() as runner:
+            rc, out, err, left = self.listen("0.2", "1.4", "--render", "c02-land")
+            self.assertEqual(rc, 1, err)
+            self.assertIn("only the vertical render", err)
+            self.assertIn("landscape", err)
+            self.assertIn("--formats vertical", err)
+            self.assertIn("source seconds", err)
+            rc, out, err, left = self.listen("0.2", "1.4", "--render", "c09-none")
+            self.assertEqual(rc, 1, err)
+            self.assertIn("--formats vertical", err)
+            self.assertNotIn("landscape", err)
+        self.assertEqual(runner.calls, [])
+
+    def test_no_rerun_line_past_the_slice_limit(self):
+        """The quiet edges only widen a slice: when the widened slice is over the limit, the
+        re-run command hc listen would refuse is not printed; the edges still warn."""
+        with mock.patch.object(L, "LISTEN_MAX", 2.0), fake_backend():
+            rc, out, err, left = self.listen("1.3", "2.7", "--json")
+            self.assertEqual(rc, 0, err)
+            data = json.loads(out)
+            self.assertIsNone(data["rerun"])
+            self.assertEqual((data["edges"]["start"]["quiet"], data["edges"]["end"]["quiet"]),
+                             (0.8, 3.2))
+            self.assertTrue(any("START 1.30 is inside voiced audio" in w for w in data["warnings"]))
+            self.assertTrue(any("END 2.70 is inside voiced audio" in w for w in data["warnings"]))
+            self.assertTrue(any("over the 2 s" in w and "two slices" in w
+                                for w in data["warnings"]), data["warnings"])
+            rc, out, err, left = self.listen("1.3", "2.7")
+            self.assertEqual(rc, 0, err)
+            self.assertNotIn("re-run from the quiet edges", err)
+            self.assertRegex(err, r"START 1\.30 is inside voiced audio")
+        # under the limit the re-run line is still printed
+        with fake_backend():
+            rc, out, err, left = self.listen("1.3", "2.7")
+        self.assertRegex(err, r"re-run from the quiet edges: hc listen \S+ 0\.80 3\.20")
+
+    def test_slice_limit_is_exact(self):
+        """A 120 s slice written to two decimals (the way hc prints its commands) is inside the
+        limit, whatever the float subtraction gives; 120.01 s is refused."""
+        with fake_backend() as runner:
+            rc, out, err, left = self.listen("9.80", "129.80")
+            self.assertEqual(rc, 1, err)
+            self.assertNotIn("at most", err)
+            self.assertIn("past the end", err)              # the 6 s fixture is too short for it
+            rc, out, err, left = self.listen("9.80", "129.81")
+            self.assertEqual(rc, 1, err)
+            self.assertIn("at most", err)
+        self.assertEqual(runner.calls, [])
+
     def test_short_slice_warns(self):
         with fake_backend():
             rc, out, err, left = self.listen("0.9", "1.5")
@@ -317,6 +374,13 @@ class ListenArgsTest(unittest.TestCase):
             cli._require_source_current(self.parse(["listen", str(P), "1", "2"]))
         self.assertEqual(cm.exception.code, 1)
         cli._require_source_current(self.parse(["listen", str(P), "1", "2", "--render", "c01"]))
+        # the bypass is listen's own: another source-bound command carrying a `render` value
+        # is still stopped
+        for cmd in ("peek", "transcribe", "plan", "qa"):
+            ns = argparse.Namespace(cmd=cmd, project=str(P), file=None, render="c01", clips=None)
+            with self.assertRaises(env.HCError, msg=cmd) as cm:
+                cli._require_source_current(ns)
+            self.assertEqual(cm.exception.code, 1)
 
 
 class ListenPartsTest(unittest.TestCase):
@@ -359,6 +423,50 @@ class ListenPartsTest(unittest.TestCase):
         self.assertIsNone(L.edge_report(E, 4.0, "start", 0.0, 20.0)["quiet"])
         self.assertIsNone(L.edge_report(E, 3.0, "end", 0.0, 20.0)["quiet"])
         self.assertTrue(L.edge_report(E, 3.0, "end", 0.0, 20.0)["voiced"])
+
+
+def plan_with_unworded(flag, dur=12.0):
+    """A one-piece clip over grid words with an `unworded_audio` flag; its lints."""
+    words = [("w%d" % k, round(0.6 + 0.4 * k, 3), round(0.9 + 0.4 * k, 3)) for k in range(20)]
+    tr = F.fake_transcript(words)
+    tr["flags"] = [flag]
+    db = np.full(int(round(dur / 0.01)), -60.0)
+    for _, s, e in words:
+        db[int(round(s / 0.01)):int(round(e / 0.01))] = -20.0
+    db[int(round(flag["s"] / 0.01)):int(round(min(flag["e"], dur) / 0.01))] = -20.0
+    src = {"fingerprint": "fp-test", "duration": dur, "audio": {"start": 0.0, "index": 1},
+           "video": {"fps": [25, 1], "start": 0.0, "width": 1920, "height": 1080,
+                     "frames": int(dur * 25), "hdr": "none", "sar": "1:1"}}
+    spec = S.normalize_spec({"version": 1, "clips": {"c01": {"pieces": [{"words": [0, 19]}]}}})
+    plan = PL.plan_clip(spec, "c01", tr, src, EnergyTrack(db, hop=0.01, t0=0.0), None)
+    return [x for x in plan["lints"] if x["id"] == "L15"]
+
+
+class ListenPointersTest(unittest.TestCase):
+    """Where hc points an agent at a slice check, it points at hc listen, which writes nothing
+    into P, never at the old scratch transcript (hc transcribe --file --clip)."""
+
+    def test_l15_unworded_audio_points_at_hc_listen(self):
+        flag = {"kind": "unworded_audio", "s": 3.2, "e": 4.6, "a": 6, "b": 7}
+        x = plan_with_unworded(flag)
+        # the gate still warns on sound with no words inside the clip
+        self.assertEqual([m["level"] for m in x], ["WARN"], x)
+        msg = x[0]["msg"]
+        self.assertIn("1.4 s of sound with no words", msg)
+        self.assertIn("hc listen P 3.00 4.80", msg)              # the flag, 0.2 s each side
+        self.assertNotIn("--clip", msg)
+        self.assertNotIn("--file", msg)
+        self.assertNotIn("SNIPPET", msg)
+        self.assertIn('"insert"', msg)
+        # near the start of the source the margin stops at 0
+        msg = PL._flag_msg({"kind": "unworded_audio", "s": 0.1, "e": 1.0}, 0, 1, 0.1)
+        self.assertIn("hc listen P 0.00 1.20", msg)
+        # a stretch longer than one slice may be: the command it names still runs
+        msg = PL._flag_msg({"kind": "unworded_audio", "s": 10.0, "e": 200.0}, 0, 1, 10.0)
+        got = re.search(r"hc listen P (\d+\.\d+) (\d+\.\d+)", msg)
+        self.assertIsNotNone(got, msg)
+        self.assertLessEqual(float(got.group(2)) - float(got.group(1)), 120.0 + 1e-6)
+        self.assertIn("slices", msg)
 
 
 class ListenDocsTest(unittest.TestCase):
