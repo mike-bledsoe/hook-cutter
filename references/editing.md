@@ -309,11 +309,12 @@ masked by the preset's punch-in (`motion.punch_in`); turn it off for a clip with
 `"motion": {"punch_in": 1.0}`.
 
 **Words under the hook card are never captioned.** The card sits in the caption band, so every
-word spoken while it is up is heard and not shown; captions start when the card ends. That is
-a trade you make on purpose. Either keep the card short (leave `dur` at `"auto"`: 1.5 to 3.0 s)
-and let the opening words go uncaptioned because the card says them, or, when the opening line
-must be read (a name, a number, a punchline a muted viewer needs), do not put it under the
-card: shorten the card until it ends before that line, or open with a beat of something else.
+word spoken while it is up (one that starts under it included) is heard and not shown; captions
+start when the card ends. That is a trade you make on purpose. Either keep the card short (leave
+`dur` at `"auto"`: 1.5 to 3.0 s) and let the opening words go uncaptioned because the card says
+them, or, when the opening line must be read (a name, a number, a punchline a muted viewer
+needs), do not put it under the card: shorten the card until it ends before that line, or open
+with a beat of something else.
 Never stretch the card over a line and then hold a pause so the captions can catch up: that is
 dead air in the first two seconds.
 

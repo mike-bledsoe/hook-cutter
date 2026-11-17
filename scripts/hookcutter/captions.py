@@ -46,6 +46,7 @@ SHORT_PAGE_COST = 150.0      # x (min_page - on-screen time) / min_page for a pa
 NUM_SPLIT_COST = 1000.0      # a page break inside a number list ("80, 90%")
 BACKFILL_MAX = 0.4           # min_page never shows a page more than this before its first word
 HOLD_GAP = 0.7               # a blank gap shorter than this between pages is filled by the earlier page
+BLINK_FRAMES = 2             # a caption-free gap of this many frames before a page or a cut is held
 HESITATION_GAP = 1.0         # a one-word hesitation page followed within this joins the next page
 AUTO_GAP = 4.0               # seconds between auto accents
 HOOK_MAX_LINES = 3           # default hook_card.max_lines: re-break up to this many lines
@@ -563,6 +564,27 @@ def accent_phrases(lines: list[str]) -> list[str]:
             if acc and text.strip():
                 out.append(text.strip())
     return out
+
+
+def accent_links(lines: list[str]) -> set[tuple[int, int]]:
+    """Pairs (a, b) of accent phrases (numbered as accent_phrases numbers them) where phrase a
+    closes one hook line and phrase b opens the next: "THE *BANK*" / "*ACCOUNT*" is one accent
+    broken over two lines. Anything between them (a comma, a word) keeps them apart."""
+    links, n, prev_last = set(), 0, None
+    for line in lines or []:
+        runs = [(text, acc) for text, acc in parse_accent_runs(line) if text.strip()]
+        first = last = None
+        for k, (_text, acc) in enumerate(runs):
+            if acc:
+                if k == 0:
+                    first = n
+                if k == len(runs) - 1:
+                    last = n
+                n += 1
+        if prev_last is not None and first is not None:
+            links.add((prev_last, first))
+        prev_last = last
+    return links
 
 
 def hook_lines(hook: dict | None) -> list[str]:
@@ -1266,8 +1288,13 @@ def schedule(pages: list[Page], setter: _Setter, max_width: float, lay: dict, le
 
 # ----------------------------------------------------------------------------- emphasis
 
-def mark_emphasis(tokens: list[Token], phrases: list[str], manual: set, sources: list) -> list:
-    """Token-level hook + manual emphasis. Returns the matches per phrase (token positions)."""
+def mark_emphasis(tokens: list[Token], phrases: list[str], manual: set, sources: list,
+                  links=()) -> list:
+    """Token-level hook + manual emphasis. Returns the matches per phrase (token positions).
+
+    `links` (accent_links): phrase pairs the hook card broke over a line. Where the speaker says
+    them together (at most 2 stopword tokens between, as inside one phrase) they are one run, so
+    emphasis.per_page counts them once; each keeps its own phrase index for the accent report."""
     matches = []
     if "hook" in sources and phrases:
         matches = match_phrases(phrases, [t.natural for t in tokens])
@@ -1277,6 +1304,24 @@ def mark_emphasis(tokens: list[Token], phrases: list[str], manual: set, sources:
                     t = tokens[pos]
                     if t.emph is None:
                         t.emph, t.run, t.phrase = "hook", ("hook", pi, mi), pi
+        stop = _lists()[0]
+
+        def joins(a, ma, mb):
+            gap = [tokens[q] for q in range(ma[-1] + 1, mb[0])]
+            return (mb[0] > ma[-1] and len(gap) <= 2 and tokens[ma[-1]].phrase == a
+                    and all(not t.emph and all(u in stop for u in word_units(t.natural))
+                            for t in gap))
+
+        for a, b in sorted(links):
+            if max(a, b) >= len(matches):
+                continue
+            for mi, mb in enumerate(matches[b]):
+                ma = next((m for m in matches[a] if joins(a, m, mb)), None)
+                if ma is None:
+                    continue
+                for pos in mb:
+                    if tokens[pos].run == ("hook", b, mi):
+                        tokens[pos].run = tokens[ma[-1]].run
     if "manual" in sources and manual:
         run_id = None
         for pos, t in enumerate(tokens):
@@ -1469,7 +1514,8 @@ class CaptionTrack:
         return _srt_cues(self._srt_tokens, self._seams, self._meta.get("duration"))
 
     def write_srt(self, path) -> Path:
-        """Sidecar subtitles from every visible word, natural case, UTF-8.
+        """Sidecar subtitles from every visible word, natural case (a cue that opens the clip or
+        a piece on a new sentence starts with a capital), UTF-8.
 
         Independent of the burned-in paging and the hook card: words spoken under the card are
         included and the card's headline is not. Cues follow subtitle conventions (at most
@@ -1751,9 +1797,22 @@ def _srt_split(words: list[str]) -> list[str] | None:
     return best
 
 
+def _cap_first(word: str) -> str:
+    """The first letter in capitals ("it's" -> "It's"); a word that already holds a capital
+    ("eBook", "SQL") is left as it is."""
+    if any(c.isupper() for c in word):
+        return word
+    for k, c in enumerate(word):
+        if c.isalpha():
+            return word[:k] + c.upper() + word[k + 1:]
+    return word
+
+
 def _srt_cues(tokens: list[Token], seams: _Seams | None = None,
               duration: float | None = None) -> list[tuple]:
-    """Subtitle cues (start, end, text) over display tokens, natural case.
+    """Subtitle cues (start, end, text) over display tokens, natural case. The clip's first word
+    and the first word of a piece that follows a sentence end start with a capital (a piece cut
+    in mid-sentence would otherwise open its cue in lower case).
 
     Hard breaks: a speaker change, a silence of SRT_GAP or more and, with `seams`, every piece,
     omit or dip join (a cue never reads across a cut). Inside a run, a dynamic programme picks
@@ -1764,6 +1823,8 @@ def _srt_cues(tokens: list[Token], seams: _Seams | None = None,
     (0 to duration), on whole milliseconds."""
     if not tokens:
         return []
+    opens = {id(t) for k, t in enumerate(tokens)
+             if k == 0 or (t.piece != tokens[k - 1].piece and _ends_sentence(tokens[k - 1].natural))}
     runs, cur = [], [tokens[0]]
     for a, b in zip(tokens, tokens[1:]):
         if ((a.sp is not None and b.sp is not None and a.sp != b.sp) or b.s - a.e >= SRT_GAP
@@ -1775,7 +1836,7 @@ def _srt_cues(tokens: list[Token], seams: _Seams | None = None,
     cues = []
     for run in runs:
         m = len(run)
-        words = [t.natural for t in run]
+        words = [_cap_first(t.natural) if id(t) in opens else t.natural for t in run]
         best = [math.inf] * (m + 1)
         back = [0] * (m + 1)
         lines_of: dict = {}
@@ -2479,14 +2540,15 @@ def build_track(plan: dict, clip: dict | None, preset: dict, fmt: str, out_size,
     hook_dur = hook["dur"] if hook else 0.0
 
     # Tokens. Every visible word feeds the SRT sidecar; the burned captions skip the words
-    # spoken under the hook card, so the first page after the card starts on a fresh phrase.
+    # spoken under the hook card, so the first page after the card starts on a fresh phrase. A
+    # word whose onset is under the card is spoken under it, even when most of it is heard after.
     tok_notes: list = []
     all_tokens = display_tokens(plan, clip, cap, tok_notes)
     for code, msg, at in tok_notes:
         issue(code, msg, at)
     tokens = list(all_tokens) if clip.get("captions", True) is not False else []
     if hook_dur > 0 and tokens:
-        tokens = [t for t in tokens if (t.s + t.e) / 2.0 >= hook_dur - lead]
+        tokens = [t for t in tokens if t.s >= hook_dur - 1e-6]
         if tokens:
             tokens[0].sentence_start = True
 
@@ -2496,7 +2558,7 @@ def build_track(plan: dict, clip: dict | None, preset: dict, fmt: str, out_size,
     per_page = emph_cfg.get("per_page", 1)
     phrases = accent_phrases(src_lines)
     manual = {int(i) for i in (clip.get("emphasis") or [])}
-    mark_emphasis(tokens, phrases, manual, sources)
+    mark_emphasis(tokens, phrases, manual, sources, accent_links(src_lines))
     join_ks = sorted(int(j["k"]) for j in plan.get("joins") or []
                      if j.get("kind") in HARD_JOINS and j.get("k") is not None)
     seams = _Seams(plan, num, den, frames, duration)
@@ -2526,6 +2588,18 @@ def build_track(plan: dict, clip: dict | None, preset: dict, fmt: str, out_size,
         if p.end_f > p.start_f:
             kept.append(p)
     pages = kept
+    # A page that ends BLINK_FRAMES or fewer frames before the next page starts, or before the
+    # cut that closes its stretch (or the clip's end), holds to it: the tail, a speaker change or
+    # a cut a frame or two after it would otherwise leave those frames with no caption, a blink.
+    # It never holds past the cut.
+    for k, p in enumerate(pages):
+        nxt = pages[k + 1] if k + 1 < len(pages) else None
+        to_f = min(seams.span(p.tokens[0].seg0, p.tokens[-1].seg1)[1],
+                   nxt.start_f if nxt is not None else frames)
+        if 0 < to_f - p.end_f <= BLINK_FRAMES:
+            p.end_f = to_f
+            to_s = min(p.hi, nxt.start if nxt is not None else duration)
+            p.end = max(p.end, min(to_s, float(Fraction(to_f * den, num))))
 
     # Layout. A build reveal anchors the first line (a page growing to two lines does not jump);
     # the block is then kept inside the safe zone vertically (caption_y can push it out).

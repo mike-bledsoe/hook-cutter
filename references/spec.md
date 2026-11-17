@@ -190,7 +190,9 @@ words"), then:
 A missing or wrong key, an `after` outside the clip's pieces, or a `src` that starts before
 its word is L01 FAIL. The inserted words get caption times spread over `src` in proportion to
 their length, appear in the captions and the `.srt`, count as spoken for QA (G5 expects to hear
-them; G11 and G14 accept them), and their span is protected from tightening. They have no word
+them; G11 and G14 accept them), and their span is protected from tightening. They play in time
+order after the `after` word; a transcript word that starts at the same moment as the insert (the
+recogniser folded the missed speech into its start) plays after it. They have no word
 index: `fix`, `emphasis`, `omit` and `verbatim` cannot address them, so write the text as it
 should read. The plan lists them in `plan.json` under `inserts` (`n`, `after`, `tokens`, `src`
 and the `piece` that plays them), and each inserted word is a `words[]` entry with `i: null`

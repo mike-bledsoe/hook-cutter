@@ -67,8 +67,6 @@ FADE_LAST = 0.06
 # lints (8.1.3)
 SENTENCE_PAUSE = 0.3
 PAYOFF_BY = {"vertical": 8.0, "landscape": 20.0}
-HOOK_ACCENT_LEAD = 0.06  # caption.lead_ms of the shipped presets: a word whose midpoint is earlier
-                         # than the card end less this is not in the burned captions
 CUT_RATE_MAX = 0.5
 UPSCALE_MAX = 3.0
 OVERLAP_MAX = 15.0
@@ -1206,10 +1204,13 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
             block.append(words[k])
             k += 1
         for tok in extra.pop(pn, []):
-            # time order, and never before the word it follows
+            # time order, and never before the word it follows. On a tie a transcript word
+            # comes after the insert ("after" says where it goes: the transcript folded the
+            # inserted speech into that word's start); an inserted word placed earlier stays first.
             pos = 0
             for j, w in enumerate(block):
-                if w.get("i") == tok["_after"] or w["s_src"] <= tok["s_src"]:
+                if (w.get("i") == tok["_after"] or w["s_src"] < tok["s_src"] - 1e-6
+                        or (w.get("i") is None and w["s_src"] <= tok["s_src"])):
                     pos = j + 1
             tok = {key: v for key, v in tok.items() if key != "_after"}
             block.insert(pos, tok)
@@ -1489,13 +1490,13 @@ def _lints(ctx, spec, cid, transcript, source, plan, recs, shots) -> list:
                 if t > lim:
                     L("L08", "WARN", f"{fmt}: hook accent {phrase!r} is first spoken at {t:.1f} s "
                       f"(payoff should land by {lim:g} s)", t)
-        # The burned captions skip every word whose midpoint falls before the card ends (less the
-        # caption lead), so an accent spoken only under the card is never highlighted in the
-        # captions (the captions.json issue accent_unshown and QA G14 report it after the render).
+        # The burned captions skip every word whose onset is under the card, so an accent that
+        # starts under the card every time it is said is never highlighted in the captions (the
+        # captions.json issue accent_unshown and QA G14 report it after the render).
         hdur = float(hc.get("dur") or 0.0)
-        for phrase, hits in _spoken_times(cap, accent_phrases(hc["lines"]), mid=True):
+        for phrase, hits in _spoken_times(cap, accent_phrases(hc["lines"])):
             hits = [h for h in hits if h is not None]
-            if hits and hdur > 0 and max(hits) < hdur - HOOK_ACCENT_LEAD:
+            if hits and hdur > 0 and max(hits) < hdur - 1e-6:
                 L("L08", "WARN", f"hook accent {phrase!r} is spoken only under the hook card "
                   f"(at {max(hits):.1f} s; the card holds until {hdur:.1f} s), so the captions "
                   "never highlight it: accent a word spoken later, or shorten hook_card.dur", hits[0])
@@ -1842,9 +1843,8 @@ def _seg_out_start(plan, piece_n):
     return None
 
 
-def _spoken_times(cap: list, phrases: list, mid: bool = False) -> list:
-    """[(phrase, [s_out of every occurrence])] matching content tokens consecutively (`mid`: the
-    first matched word's midpoint instead of its s_out)."""
+def _spoken_times(cap: list, phrases: list) -> list:
+    """[(phrase, [s_out of every occurrence])] matching content tokens consecutively."""
     raws = [w["text"] or w["raw"] for w in cap]
     stream = [(t, k) for t, k, _ in tn.norm_stream(raws)
               if t not in tn.STOPWORDS and not tn.is_filler(t)]
@@ -1856,9 +1856,7 @@ def _spoken_times(cap: list, phrases: list, mid: bool = False) -> list:
         if P:
             for j in range(0, len(toks) - len(P) + 1):
                 if toks[j:j + len(P)] == P:
-                    w = cap[stream[j][1]]
-                    hits.append((w["s_out"] + w["e_out"]) / 2.0
-                                if mid and w.get("e_out") is not None else w["s_out"])
+                    hits.append(cap[stream[j][1]]["s_out"])
         out.append((ph, hits))
     return out
 

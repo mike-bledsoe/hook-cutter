@@ -176,12 +176,17 @@ class PillRule(unittest.TestCase):
 
 class HookTrim(unittest.TestCase):
     def test_first_page_after_the_card_is_a_fresh_phrase(self):
-        words = [("him,", {"s": 1.0, "e": 1.42}), ("let's", {"s": 1.44, "e": 1.6}),
+        words = [("him,", {"s": 1.0, "e": 1.48}), ("let's", {"s": 1.5, "e": 1.6}),
                  ("sell", {"s": 1.6, "e": 1.8}), ("it.", {"s": 1.8, "e": 2.1})]
         plan = TC.make_plan(words, hook={"lines": ["SELL *IT*"], "dur": 1.5})
         track = TC.build(plan)
         self.assertEqual(TC.page_texts(track)[0], "LET'S SELL IT")
-        self.assertIn("him,", "\n".join(c[2] for c in track.srt_cues()))     # still in the SRT
+        self.assertIn("Him,", "\n".join(c[2] for c in track.srt_cues()))     # still in the SRT
+        # a word whose onset is under the card is spoken under it, even 60 ms before its end
+        words[0], words[1] = ("him,", {"s": 1.0, "e": 1.42}), ("let's", {"s": 1.44, "e": 1.6})
+        track = TC.build(TC.make_plan(words, hook={"lines": ["SELL *IT*"], "dur": 1.5}))
+        self.assertEqual(TC.page_texts(track)[0], "SELL IT")
+        self.assertIn("Him, let's", "\n".join(c[2] for c in track.srt_cues()))
 
 
 class ClauseRule(unittest.TestCase):

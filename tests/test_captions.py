@@ -302,7 +302,7 @@ class HookTests(unittest.TestCase):
         # The SRT carries what is said, not the card's headline: the first cue is the first
         # spoken word (the hook card is a title, not speech).
         self.assertTrue(text.startswith("1\n00:00:03,500 --> "), text)
-        self.assertIn("hello world", text)
+        self.assertIn("Hello world", text)                  # the clip's first word: a capital
         self.assertNotIn("SAY", text)
 
     def test_long_hook_line_is_rebroken_bigger(self):
