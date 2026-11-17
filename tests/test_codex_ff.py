@@ -562,16 +562,17 @@ class _MockedCover(_Tmp):
 
 class CoverTimeRoundTrip(_MockedCover):
     def test_a_recorded_time_is_kept_when_fed_back(self):
-        for (num, den), given, frame_time in (((30000, 1001), 0.5, 0.467133), ((30, 1), 0.45, 0.433333),
-                                              ((24000, 1001), 1.0, 0.959292)):
-            with self.subTest(fps=(num, den)):
+        # a time names its nearest frame (a half frame goes to the later one)
+        for (num, den), given, frame_time in (((30000, 1001), 0.5, 0.5005), ((30, 1), 0.45, 0.466667),
+                                              ((24000, 1001), 1.0, 1.001), ((30, 1), 0.44, 0.433333)):
+            with self.subTest(fps=(num, den), given=given):
                 self.rate(num, den)
                 first = self.patched(lambda: cover.make_cover(self.P, "c01", "clean", at_out=given))
                 self.assertEqual(first["at_out"], frame_time)
                 again = self.patched(lambda: cover.make_cover(self.P, "c01", "clean", at_out=first["at_out"]))
                 self.assertEqual(again["at_out"], first["at_out"])
                 self.assertEqual(cover_frames.frame_index(first["at_out"], (num, den)),
-                                 cover_frames.frame_index(given, (num, den)))
+                                 cover_frames.nearest_frame(given, (num, den)))
 
 
 # ------------------------------------------------------------------ stage A of this plan and style (C1)

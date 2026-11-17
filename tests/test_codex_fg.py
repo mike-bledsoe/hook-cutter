@@ -611,9 +611,9 @@ class CoverFrameIndex(unittest.TestCase):
     def test_time_copied_from_a_cover_json_maps_back_to_its_frame(self):
         # frame 13 at 30 fps is stored as 0.433333, a hair under 13/30
         self.assertEqual(self.reasons("cfi-a", (30, 1), 0.433333, 0.433333), [])
-        self.assertEqual(self.reasons("cfi-b", (30, 1), 0.45, 0.433333), [])
+        self.assertEqual(self.reasons("cfi-b", (30, 1), 0.46, 0.466667), [])     # nearest frame: 14
         self.assertEqual(self.reasons("cfi-c", (30000, 1001), 0.467133, 0.467133), [])
-        self.assertEqual(self.reasons("cfi-d", (30000, 1001), 0.5, 0.467133), [])
+        self.assertEqual(self.reasons("cfi-d", (30000, 1001), 0.5, 0.5005), [])
         self.assertEqual(self.reasons("cfi-e", (25, 1), 0.44, 0.44), [])
         # a cover that was cut one frame early is not the cover of this time
         self.assertEqual(self.reasons("cfi-f", (30, 1), 0.433333, 0.4), ["at_out"])
@@ -624,10 +624,11 @@ class CoverFrameIndex(unittest.TestCase):
         self.assertEqual(cli.COVER_FRAME_TOL, cf.FRAME_TOL)
         for num, den in ((30, 1), (30000, 1001), (24, 1), (24000, 1001), (60, 1), (25, 1), (120, 1)):
             for n in range(0, 400):
-                t = round(n * den / num, 6)
-                mine = int(math.floor(t * num / den + cli.COVER_FRAME_TOL))
-                self.assertEqual(mine, n, (num, den, n))
-                self.assertEqual(mine, cf.frame_index(t, (num, den)))
+                for part in (0.0, 0.3, 0.5, 0.7):
+                    t = round((n + part) * den / num, 6)
+                    mine = int(math.floor(t * num / den + 0.5 + cli.COVER_FRAME_TOL))
+                    self.assertEqual(mine, n + (1 if part >= 0.5 else 0), (num, den, n, part))
+                    self.assertEqual(mine, cf.nearest_frame(t, (num, den)))
 
 
 # ---------------------------------------------------------------- hc all keys (R1, V05-N1, V08-N1, R4)

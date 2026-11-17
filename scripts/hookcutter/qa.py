@@ -42,7 +42,8 @@ MAX_TRUE_PEAK = -1.0
 MAX_ODD_AAC_PACKETS = 5
 PTS_JITTER_SAMPLES = 2           # G3: an audio packet this many samples off the grid is not a hole
 BLACK_FILTER = "blackdetect=d=0:pix_th=0.06"     # d=0: a single black frame anywhere is seen
-FREEZE_FILTER = "freezedetect=n=0.003:d=1.0"
+FREEZE_NOISE = 0.003            # freezedetect: mean absolute frame difference (0-1) at most this ...
+FREEZE_FILTER = "freezedetect=n={n}:d=1.0"      # ... for a second or more
 JOIN_WINDOW_FRAMES = 3
 MID_SOUND_DB = 20.0
 OPEN_WIN = 0.03
@@ -92,6 +93,7 @@ DARK_LUMA = 20                   # G8 / G12 dark rows: max luma at most this ove
 DARK_MIN_FRAC = 0.03             # a dark band taller than this fraction of the height is reported
 DARK_FAIL_FRAC = 0.10
 DARK_SAMPLES = 8
+FILL_MARGIN = 4                  # G8 / G12: rows this close to a letterboxed picture are judged as picture
 LUMA_SCALE = 8                   # luma scans decode at 1/8 size
 GRID_BAND = (240, 1680)          # the platform's 3:4 profile-grid crop of a 9:16 cover
 COVER_TINT_LEAD = 300            # G12 dark band: the cover tint ramp starts this far above the headline
@@ -1293,6 +1295,81 @@ def _band_rows(band, H: int, h: int):
     return (float(band[0]) * h / H, (float(band[0]) + float(band[1])) * h / H)
 
 
+def letterbox_picture_rows(win: dict, src_wh, out_wh, y_center) -> tuple[int, int] | None:
+    """Output rows [y0, y1) of the picture in a `letterbox`, `rect` or `full` framing window
+    (render log `framing_windows`), placed the way render places it: fitted inside the frame
+    at even sizes, centred on the style's letterbox `y_center` (`full`: on the middle) and kept
+    inside the frame. The rows above and below it are the blurred, dimmed fill render makes
+    from that picture. None for a crop, a window that does not parse, or a picture as tall as
+    the frame (no fill rows)."""
+    mode = str((win or {}).get("mode") or "")
+    if mode not in ("letterbox", "rect", "full"):
+        return None
+    try:
+        sw, sh = (int(v) for v in src_wh)
+        ow, oh = (int(v) for v in out_wh)
+        rw = max(2, int(round((float(win["hi"]) - float(win["lo"])) * sw / 2)) * 2)
+        rh = max(2, int(round((float(win["y_hi"]) - float(win["y_lo"])) * sh / 2)) * 2)
+    except (KeyError, TypeError, ValueError):
+        return None
+    fh = max(2, int(round(ow * rh / float(rw) / 2)) * 2)
+    if fh >= oh:
+        return None
+    yc = oh / 2.0 if mode == "full" else float(y_center or oh / 2)
+    fy = int(min(max(0.0, yc - fh / 2.0), oh - fh)) // 2 * 2
+    return fy, fy + fh
+
+
+def _fill_layout(ctx: _Ctx | None, cid: str | None, fmt: str, style: str) -> list | None:
+    """[(out0, out1, picture rows or None)] for each framing window of the render's log, None
+    when the log, its windows or the source size are not there (then no row is fill)."""
+    if ctx is None or not cid or not style:
+        return None
+    lp = Path(ctx.project.render_path(cid, fmt, style, ".log.json"))
+    try:
+        log = env.read_json(lp) if lp.is_file() else None
+    except env.HCError:
+        return None
+    wins = log.get("framing_windows") if isinstance(log, dict) else None
+    if not isinstance(wins, list) or not wins:
+        return None
+    try:
+        from . import framing
+        from .cover_frames import out_size
+        src_wh = framing.display_size(ctx.project.source())
+        out_wh = tuple(log.get("size") or out_size(fmt))
+        lb = ctx.preset(style, fmt).get("letterbox")
+        yc = (lb if isinstance(lb, dict) else {}).get("y_center")
+        yc = int(framing.DEFAULT_LETTERBOX["y_center"] if yc is None else yc)
+        return [(float(w["out"][0]), float(w["out"][1]), letterbox_picture_rows(w, src_wh, out_wh, yc))
+                for w in wins]
+    except (env.HCError, KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def _rows_at(layout: list | None, t: float):
+    """Picture rows of the framing window on screen at out time t (None: no fill, or unknown)."""
+    for t0, t1, rows in layout or []:
+        if t0 - 1e-6 <= t < t1 - 1e-6:
+            return rows
+    return None
+
+
+def _fill_mask(pic, h: int, H: int, photo_h: float | None = None) -> np.ndarray:
+    """Rows of an h-row scan of an H-row frame that lie wholly in the letterbox fill of a
+    picture at output rows `pic` (FILL_MARGIN off its edges; rows from `photo_h` down are not
+    photo at all: a cover's tint canvas)."""
+    out = np.zeros(h, bool)
+    if not pic:
+        return out
+    y0, y1 = float(pic[0]) - FILL_MARGIN, float(pic[1]) + FILL_MARGIN
+    end = float(H if photo_h is None else photo_h)
+    for r in range(h):
+        top, bot = r * H / h, (r + 1) * H / h
+        out[r] = bot <= y0 or (top >= y1 and bot <= end)
+    return out
+
+
 def _source_has_active_area(ctx: _Ctx) -> bool:
     try:
         v = (ctx.project.source() or {}).get("video") or {}
@@ -1318,11 +1395,33 @@ def _flags_sheet(ctx: _Ctx, cid: str, fmt: str, style: str, render: Path, times:
 
 
 def g8_black_freeze(plan: dict, render: Path, band: list | None, target: str, ctx: _Ctx | None = None,
-                    cid: str | None = None, fmt: str = "vertical", style: str = "") -> dict:
+                    cid: str | None = None, fmt: str = "vertical", style: str = "", stale: bool = False) -> dict:
+    """G8 on one render. Where the render log shows a letterboxed picture (a `letterbox`,
+    `rect` or `full` window with fill rows), the blurred fill render made from that picture is
+    not judged: the dark-band scan skips its rows and measures a band against the picture's
+    rows (the share of its height the fill used to show a source bar at), and when every
+    window has fill the freeze check reads only the picture rows, its threshold scaled to the
+    share of them the masked caption band leaves (a still fill and a black band would hide a
+    talking head). A stale render (`stale`, G0) is judged on the whole frame, as is a render
+    with no framing log."""
+    layout = None if stale else _fill_layout(ctx, cid, fmt, style)
+    pics = [rows for _t0, _t1, rows in layout or []]
+    still = (min(r[0] for r in pics), max(r[1] for r in pics)) if pics and all(pics) else None
+    masked_h = 0
+    if still and band and band[1] > 0:
+        masked_h = max(0, min(still[1], int(band[0]) + int(band[1])) - max(still[0], int(band[0])))
+        if masked_h >= still[1] - still[0]:
+            still = None                 # the band covers the picture: judge the whole frame
     vf = []
     if band and band[1] > 0:
         vf.append(f"drawbox=x=0:y={int(band[0])}:w=iw:h={int(band[1])}:color=black:t=fill")
-    vf += [BLACK_FILTER, FREEZE_FILTER]
+    vf.append(BLACK_FILTER)
+    if still:
+        share = 1.0 - masked_h / float(still[1] - still[0])
+        vf += [f"crop=w=iw:h={still[1] - still[0]}:x=0:y={still[0]}",
+               FREEZE_FILTER.format(n=f"{FREEZE_NOISE * share:.6f}")]
+    else:
+        vf.append(FREEZE_FILTER.format(n=FREEZE_NOISE))
     rc, _, err = _run([env.ffmpeg(), "-hide_banner", "-nostdin", "-nostats", "-loglevel", "info",
                        "-i", str(render), "-map", "0:v:0", "-vf", ",".join(vf), "-an", "-f", "null", "-"])
     if rc != 0:
@@ -1338,6 +1437,12 @@ def g8_black_freeze(plan: dict, render: Path, band: list | None, target: str, ct
             flag_t.append(s + 0.5 * fd)
             flag_l.append(f"{s:.2f}s black")
     extra = ""
+    fill_out = bool(still)
+    if still:
+        notes.append(f"freezes checked on the picture rows y {still[0]}-{still[1]} only (the letterbox "
+                     "fill around them is render's blurred copy of the picture)"
+                     + (f", the threshold scaled to the {still[1] - still[0] - masked_h} rows the caption "
+                        "band leaves" if masked_h else ""))
     from .cover_frames import out_size
     try:
         W, H = out_size(fmt)
@@ -1366,13 +1471,25 @@ def g8_black_freeze(plan: dict, render: Path, band: list | None, target: str, ct
             flag_t.append(t + 0.5 * fd)
             flag_l.append(f"{t:.2f}s flash f{k}")
         idx = np.unique(np.linspace(0, n - 1, min(DARK_SAMPLES, n)).round().astype(int))
-        row_max = lum[idx].max(axis=(0, 2))
-        bands = dark_bands(row_max, skip=rows)
+        per = lum[idx].max(axis=2)                        # each sampled frame's row maxima
+        fill = np.array([_fill_mask(_rows_at(layout, (k + 0.5) * fd), h, H) for k in idx])
+        if fill.any():
+            # a fill row of one frame says nothing; a row that is fill in every frame is never a band
+            per = np.where(fill, 0, per)
+            fill_out = True
+            notes.append("letterbox fill rows left out of the dark-band scan (render made them from the picture)")
+        row_max = per.max(axis=0)
+        always = fill.all(axis=0)
+        row_max[always] = 255
+        # A band inside a letterboxed picture is measured against the picture's rows, the level
+        # the fill (the picture stretched to the frame height) used to show it at.
+        judged = max(1, int(h - always.sum()))
+        bands = dark_bands(row_max, skip=rows, height=judged)
         if bands:
-            big = any((b - a) / h >= DARK_FAIL_FRAC for a, b in bands)
+            big = any((b - a) / judged >= DARK_FAIL_FRAC for a, b in bands)
             lvl = "FAIL" if (big or (ctx is not None and _source_has_active_area(ctx))) else "WARN"
             statuses.append(lvl)
-            notes.append(f"{lvl} dark band {_band_text(bands, h, H)} across all {len(idx)} sampled frames "
+            notes.append(f"{lvl} dark band {_band_text(bands, h, H, judged)} across all {len(idx)} sampled frames "
                          "(letterbox bars or gallery border in the picture)")
     if ctx is not None and cid and flag_t:
         sheet = _flags_sheet(ctx, cid, fmt, style, render, flag_t, flag_l)
@@ -1380,7 +1497,8 @@ def g8_black_freeze(plan: dict, render: Path, band: list | None, target: str, ct
             ctx.flag_sheets[(cid, fmt, style)] = sheet
             notes.append(f"flagged frames: {ctx.project.rel(sheet)}")
     final = worst(statuses)
-    masked = " (caption band masked)" if band else ""
+    kept = (["caption band masked"] if band else []) + (["letterbox fill not judged"] if fill_out else [])
+    masked = f" ({'; '.join(kept)})" if kept else ""
     if final == "PASS":
         return gate("G8", "PASS", f"no black at frame 0 or at {len(plan.get('joins') or [])} join(s), no black or "
                     f"single-frame flash elsewhere, no freeze >= 1 s, no dark band{masked}{extra}",
@@ -2025,13 +2143,15 @@ def check_cover_file(path: Path) -> list[str]:
     return probs
 
 
-def dark_bands(row_max, skip=None) -> list[tuple[int, int]]:
+def dark_bands(row_max, skip=None, height=None) -> list[tuple[int, int]]:
     """Runs [r0, r1) of full-width dark rows (max luma <= DARK_LUMA across the row) taller than
-    DARK_MIN_FRAC of the height. `skip` = (r0, r1) rows that are never dark (the caption band)."""
+    DARK_MIN_FRAC of the height. `skip` = (r0, r1) rows that are never dark (the caption band).
+    `height`: the rows a band is measured against (a letterboxed picture's rows), else all."""
     rm = np.asarray(row_max, dtype=np.float64).copy()
     h = rm.size
     if h == 0:
         return []
+    denom = float(height) if height else float(h)
     if skip:
         a, b = max(0, int(skip[0])), min(h, int(math.ceil(skip[1])))
         rm[a:b] = 255.0
@@ -2042,7 +2162,7 @@ def dark_bands(row_max, skip=None) -> list[tuple[int, int]]:
             j = k
             while j < h and dark[j]:
                 j += 1
-            if (j - k) / h > DARK_MIN_FRAC:
+            if (j - k) / denom > DARK_MIN_FRAC:
                 out.append((k, j))
             k = j
         else:
@@ -2050,8 +2170,12 @@ def dark_bands(row_max, skip=None) -> list[tuple[int, int]]:
     return out
 
 
-def _band_text(bands, h: int, H: int) -> str:
-    return ", ".join(f"y {int(round(a * H / h))}-{int(round(b * H / h))} ({(b - a) / h:.0%})" for a, b in bands)
+def _band_text(bands, h: int, H: int, height: int | None = None) -> str:
+    """Bands as output rows with their share of the frame, or of `height` scan rows (the
+    letterboxed picture) when that is not the whole scan."""
+    of = height if height and height != h else None
+    return ", ".join(f"y {int(round(a * H / h))}-{int(round(b * H / h))} ({(b - a) / (of or h):.0%}"
+                     + (" of the picture)" if of else ")") for a, b in bands)
 
 
 def _same_speaker(a, b) -> bool:
@@ -2120,6 +2244,32 @@ def _cover_outdated(ctx: _Ctx, cid: str, style: str, plan: dict | None, meta: di
     return out
 
 
+def _cover_fill(ctx: _Ctx, cid: str, style: str, meta: dict | None, h: int) -> tuple[np.ndarray, int] | None:
+    """(fill, picture): the rows of the cover scan (h rows) that are the letterbox fill around
+    the tile, and how many scan rows of the photo show the picture (a band is measured against
+    those). The cover frame was cut from this plan's render (`frame_source: segments`) and that
+    render's log shows a letterboxed picture at the cover's `at_out`; the photo slid up by its
+    `shift`. None when the cover json, the render log or the framing cannot vouch for it."""
+    if not isinstance(meta, dict) or meta.get("frame_source") != "segments":
+        return None
+    try:
+        at, shift = float(meta["at_out"]), max(0.0, float(meta.get("shift") or 0))
+    except (KeyError, TypeError, ValueError):
+        return None
+    pic = _rows_at(_fill_layout(ctx, cid, "vertical", style), at)
+    if not pic:
+        return None
+    fill = _fill_mask((pic[0] - shift, pic[1] - shift), h, 1920, photo_h=1920 - shift)
+    photo = np.arange(h) * 1920.0 / h < 1920 - shift          # rows below are the tint canvas
+    return fill, max(1, int((photo & ~fill).sum()))
+
+
+def _size_fit_note(text) -> bool:
+    """A cover warning written by cover.fit_headline (the headline set below the preset's size
+    range, or on more lines than max_lines)."""
+    return str(text).startswith(("headline needed ", "headline does not fit"))
+
+
 def g12_cover(ctx: _Ctx, cid: str, style: str, plan: dict | None, render_stale: bool = False) -> dict:
     """The cover file, judged against the platform's fixed 240-1680 grid crop (never the
     preset's own band): headline (ink box when the generator records it) inside the band, the
@@ -2148,16 +2298,22 @@ def g12_cover(ctx: _Ctx, cid: str, style: str, plan: dict | None, render_stale: 
             meta = env.read_json(jp)
         except env.HCError:
             meta = None
-    rows = _cover_rows(main)
+    rows, fill, judged = _cover_rows(main), None, None
     if rows is not None:
         # Only the photo above the tint ramp: the ramp darkens the lower cover on purpose.
         hb0 = (meta or {}).get("ink_box") or (meta or {}).get("headline_box")
         top = float(hb0[1]) - COVER_TINT_LEAD if hb0 else COVER_TINT_FROM * 1920
         h = rows.size
         cut = max(0, min(h, int(top * h / 1920)))
-        bands = dark_bands(rows, skip=(cut, h)) if cut > 0 else []
+        lb = None if render_stale else _cover_fill(ctx, cid, style, meta, h)
+        if lb is not None and lb[0].any():
+            fill, judged = lb
+            rows = rows.copy()
+            rows[fill] = 255           # render's letterbox fill around the tile: never a band
+        # a band inside the tile is measured against the tile's rows (see G8)
+        bands = dark_bands(rows, skip=(cut, h), height=judged) if cut > 0 else []
         if bands:
-            fails.append(f"dark band on the cover: {_band_text(bands, h, 1920)} above the headline "
+            fails.append(f"dark band on the cover: {_band_text(bands, h, 1920, judged)} above the headline "
                          "(letterbox bars or a black frame in the picture)")
     faces_n = None
     if meta is None:
@@ -2223,7 +2379,11 @@ def g12_cover(ctx: _Ctx, cid: str, style: str, plan: dict | None, render_stale: 
             warns.append("no face found: face overlap unchecked")
         elif tb and fb and box_overlap(tb, fb) > 0:
             warns.append("headline covers the face (pick another frame with cover.at_out or shorten the headline)")
-        if meta.get("font_fallback"):
+        # A headline set below the preset's size range is the cover's own warning (reported once,
+        # below). Covers made before `size_fallback` was recorded set font_fallback from that size
+        # fit too, so there the flag names no typeface when the size warning explains it.
+        sized = "size_fallback" not in meta and any(_size_fit_note(w) for w in meta.get("warnings") or [])
+        if meta.get("font_fallback") and not sized:
             warns.append("the headline font fell back to another face (check the cover lettering)")
         fsp, csp = meta.get("frame_speaker"), ctx.spec["clips"].get(cid, {}).get("speaker") if ctx.spec.get("clips") else None
         if fsp and csp and str(fsp) != str(csp) and not _same_speaker(fsp, csp):
@@ -2254,7 +2414,9 @@ def g12_cover(ctx: _Ctx, cid: str, style: str, plan: dict | None, render_stale: 
     if warns:
         return gate("G12", "WARN", "; ".join(warns), det, target=target, gap=gap)
     return gate("G12", "PASS", f"decodes, 1080x1920, headline inside the {GRID_BAND[0]}-{GRID_BAND[1]} grid band, "
-                f"{faces_n} face(s) found and clear of the headline, no dark band, grid + mobile present", target=target)
+                f"{faces_n} face(s) found and clear of the headline, no dark band"
+                + (" (letterbox fill not judged)" if fill is not None else "")
+                + ", grid + mobile present", target=target)
 
 
 def surface_echo(a: str, b: str) -> float | None:
@@ -2791,7 +2953,7 @@ def check_clip(ctx: _Ctx, cid: str) -> dict:
             results.append(g3_streams(ctx, plan, fmt, rp, tgt))
             cap, cap_path, disabled = _captions(ctx, cid, fmt, st)
             band = (cap or {}).get("band")
-            results.append(g8_black_freeze(plan, rp, band, tgt, ctx, cid, fmt, st))
+            results.append(g8_black_freeze(plan, rp, band, tgt, ctx, cid, fmt, st, stale=(fmt, st) in stale))
             if (fmt, st) in stale:
                 for gid in ("G9", "G10", "G14"):
                     results.append(gate(gid, "SKIPPED", "render is stale (G0): its captions describe an older plan",

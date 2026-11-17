@@ -575,6 +575,16 @@ def frame_index(seconds: float, fps) -> int:
     return int(math.floor(float(seconds) * num / den + FRAME_TOL))
 
 
+def nearest_frame(seconds: float, fps) -> int:
+    """Index of the frame whose start is nearest to `seconds` (a half frame goes to the later
+    one): what a time the user writes names. A frame time written with three decimals, or a
+    printed one, can sit a hair before its frame starts (35.458 is 850.99 frames at 24 fps),
+    so the frame on screen there (frame_index) would be the one before it. `hc status` uses
+    the same expression (cli.cover_stale_reasons): keep the two identical."""
+    num, den = int(fps[0]), int(fps[1])
+    return int(math.floor(float(seconds) * num / den + 0.5 + FRAME_TOL))
+
+
 def seg_at(plan: dict, t_out: float) -> tuple[int, dict] | None:
     """Plan segment containing an out time (last segment for t at the very end)."""
     segs = plan.get("segments") or []
