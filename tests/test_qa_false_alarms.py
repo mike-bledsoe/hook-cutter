@@ -11,8 +11,10 @@ interview (host and guest in two tiles, each clip framed with a letterbox `rect`
   three decimals named the frame before it; and a recorded time that lands on another source
   frame after an edge moved gave no warning.
 
-The real defects stay caught: a black bar inside the picture, a cover cut from the source, a
-frozen tile and a stale render are judged as before. Everything is synthetic: lavfi renders,
+The real defects stay caught: a black bar inside the picture is measured against the
+picture's height (the share the fill used to show it at, so 2:1 and 2.39:1 source bars keep
+their levels), and a cover cut from the source, a frozen tile and a stale render are judged as
+before. Everything is synthetic: lavfi renders,
 hand-written render logs, cover json and PIL covers.
 """
 
@@ -123,6 +125,13 @@ class PictureRows(unittest.TestCase):
                                       {"width": sw, "height": sh})[0]
                 self.assertEqual(qa.letterbox_picture_rows(win, (sw, sh), (1080, 1920), yc), (fy, fy + fh))
 
+    def test_a_band_is_measured_against_the_rows_given(self):
+        rows = np.array([10] * 2 + [200] * 98)
+        self.assertEqual(qa.dark_bands(rows), [])                        # 2 % of 100 rows
+        self.assertEqual(qa.dark_bands(rows, height=50), [(0, 2)])      # 4 % of a 50-row picture
+        self.assertEqual(qa._band_text([(0, 2)], 100, 1920, 50), "y 0-38 (4% of the picture)")
+        self.assertEqual(qa._band_text([(0, 4)], 100, 1920), "y 0-77 (4%)")
+
     def test_a_crop_or_a_full_height_picture_has_no_fill_rows(self):
         self.assertIsNone(qa.letterbox_picture_rows(dict(TILE, mode="crop"), (1280, 720), (1080, 1920), 820))
         tall = dict(TILE, lo=0.0, hi=0.25)                      # 320x648: taller than 9:16
@@ -156,9 +165,11 @@ class LetterboxPicture(_Project):
         self.assertIn("letterbox fill", g["evidence"])
 
     def test_a_black_bar_inside_the_tile_is_still_a_band(self):
+        # 128 rows of a 1094-row picture (12 %): judged against the picture, as the fill used to
+        # show it magnified to the frame height, so it FAILs at the same level as before
         g = self.g8(self.project("bar", [dict(TILE, out=[0.0, DUR])]), self.tile_bar)
-        self.assertEqual(g["status"], "WARN", g["evidence"])
-        self.assertIn("dark band y 264-400", g["evidence"])
+        self.assertEqual(g["status"], "FAIL", g["evidence"])
+        self.assertIn("dark band y 264-400 (12% of the picture)", g["evidence"])
         P = self.project("bar-aa", [dict(TILE, out=[0.0, DUR])])
         env.write_json(P.root / "source.json", {"video": {"width": 1280, "height": 720,
                                                           "active_area": [0, 0, 1280, 720]}, "audio": {}})
@@ -246,7 +257,17 @@ class LetterboxCover(_Project):
         self.cover(P, bar=120)
         g = self.g12(P)
         self.assertEqual(g["status"], "FAIL", g["evidence"])
-        self.assertIn("dark band on the cover: y 264-392", g["evidence"])
+        self.assertIn("dark band on the cover: y 264-392 (12% of the picture)", g["evidence"])
+
+    def test_a_thin_bar_inside_the_tile_fails_against_the_picture_height(self):
+        # 48 rows: 3 % of the 1920-row cover would not report it, 4 % of the 1094-row picture does
+        P = self.project("P", [dict(TILE, out=[0.0, DUR])])
+        self.cover(P, bar=48)
+        g = self.g12(P)
+        self.assertEqual(g["status"], "FAIL", g["evidence"])
+        self.assertIn("of the picture", g["evidence"])
+        self.cover(P, bar=48, shift=120)          # the photo slid up: the bar is still judged on the picture
+        self.assertEqual(self.g12(P)["status"], "FAIL")
 
     def test_a_cover_the_render_cannot_vouch_for_is_judged_as_before(self):
         for name, windows, src, stale in (("source", [dict(TILE, out=[0.0, DUR])], "source", False),
@@ -260,6 +281,85 @@ class LetterboxCover(_Project):
                 self.assertEqual(g["status"], "FAIL", g["evidence"])
                 self.assertIn("dark band on the cover: y 0-272", g["evidence"])
 
+
+# ---------------------------------------------------------------- source bars through render's letterbox
+
+class SourceBarsThroughTheLetterbox(_Project):
+    """A 1280x720 source with letterbox bars baked into the picture and no measured
+    `active_area`, framed `letterbox` on the whole frame and rendered with render's own chain.
+    The fill is a blurred copy of the picture stretched to the frame height, so it used to show
+    the bars magnified; with the fill left out, a bar is judged against the picture's own
+    height, at the level the fill gave it: 2:1 content (bars 5.6 % of the source) WARNs in
+    G8 and FAILs in G12, 2.39:1 (12.8 %) FAILs in both."""
+
+    FPS, LEN, SW, SH = 25, 1.2, 1280, 720
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="hc-qafa-bars-"))
+        cls.renders = {}
+        n = int(cls.FPS * cls.LEN)
+        for name, bar in (("none", 0), ("2to1", 40), ("239to1", 92)):
+            src = cls.tmp / f"src-{name}.mp4"
+            vf = f"testsrc2=size={cls.SW}x{cls.SH}:rate={cls.FPS}:duration={cls.LEN}"
+            if bar:
+                vf += (f",drawbox=x=0:y=0:w=iw:h={bar}:color=black:t=fill,"
+                       f"drawbox=x=0:y={cls.SH - bar}:w=iw:h={bar}:color=black:t=fill")
+            _ff(["-f", "lavfi", "-i", vf, "-frames:v", str(n), *render_mod.LOSSLESS_V, str(src)])
+            sub = {"src": [0.0, cls.LEN], "frames": n, "mode": "letterbox", "size": [cls.SW, cls.SH],
+                   "cmds": [], "zoom": 1.0, "rect": [0, 0, cls.SW, cls.SH], "y_center": 820,
+                   "blur": 28, "dim": 0.35}
+            video = {"width": cls.SW, "height": cls.SH}
+            chain = render_mod._sub_chain("[0:v]", "[v]", sub, 0, 0.0, Fraction(cls.FPS), video,
+                                          (1080, 1920), None, False)
+            rp = cls.tmp / f"r-{name}.mp4"
+            _ff(["-i", str(src), "-filter_complex", chain, "-map", "[v]", *render_mod.FINAL_V, str(rp)])
+            win = framing.windows([[sub]], {"fps": [cls.FPS, 1], "segments": [{"out": [0.0, cls.LEN]}]}, video)
+            cls.renders[name] = (rp, win)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def g8(self, name):
+        rp, win = self.renders[name]
+        P = self.project(f"g8-{name}", win)
+        plan = {"fps": [self.FPS, 1], "duration_out": self.LEN, "joins": []}
+        return qa.g8_black_freeze(plan, rp, None, "vertical/clean", self.ctx(P), "c1", "vertical", "clean")
+
+    def g12(self, name):
+        rp, win = self.renders[name]
+        P = self.project(f"g12-{name}", win)
+        png = self.tmp / f"frame-{name}.png"
+        _ff(["-ss", "0.6", "-i", str(rp), "-frames:v", "1", str(png)])
+        with Image.open(png) as im:
+            img = im.convert("RGB")
+        ImageDraw.Draw(img).rectangle([80, 1300, 1000, 1500], fill=(255, 255, 255))
+        cover.save_jpeg(img, P.cover_path("c1", "clean", "main"))
+        for kind in ("grid", "mobile"):
+            cover.save_jpeg(img.resize((270, 360)), P.cover_path("c1", "clean", kind))
+        env.write_json(P.cover_path("c1", "clean", "json"),
+                       {"headline_box": [80, 1300, 920, 200], "text_box": [80, 1300, 920, 200],
+                        "face_box": [400, 600, 300, 300], "faces_found": 1, "crown_y": 560,
+                        "crown_method": "image", "at_out": 0.6, "shift": 0, "frame_source": "segments",
+                        "band": [240, 1680], "warnings": [], "spec_hash": "h"})
+        return qa.g12_cover(self.ctx(P), "c1", "clean", {"spec_hash": "h"})
+
+    def test_g8_judges_a_source_bar_against_the_picture(self):
+        for name, want in (("none", "PASS"), ("2to1", "WARN"), ("239to1", "FAIL")):
+            with self.subTest(name):
+                g = self.g8(name)
+                self.assertEqual(g["status"], want, g["evidence"])
+                if want != "PASS":
+                    self.assertIn("of the picture", g["evidence"])
+
+    def test_g12_judges_a_source_bar_against_the_picture(self):
+        for name, want in (("none", "PASS"), ("2to1", "FAIL"), ("239to1", "FAIL")):
+            with self.subTest(name):
+                g = self.g12(name)
+                self.assertEqual(g["status"], want, g["evidence"])
+                if want == "PASS":
+                    self.assertIn("letterbox fill not judged", g["evidence"])
 
 # ---------------------------------------------------------------- size fallback vs typeface
 
