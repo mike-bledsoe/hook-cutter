@@ -300,6 +300,75 @@ def make_speech_fixture(dir: Any, words: Iterable[Sequence[Any]], *, fps: str = 
     return out
 
 
+def make_peaky_speech_fixture(dir: Any, *, dur: float = 12.0, body_db: float = -13.0,
+                              span_db: float = 12.0, seed: int = 3, fps: str = "25",
+                              size: str = "640x360") -> Path:
+    """mp4 with a hot, clipped, speech-like track: syllables of a 110-170 Hz voice (8 harmonics)
+    whose levels vary over ``span_db``, the loudest peaking at ``body_db`` dBFS, each opening on
+    a 4 ms 2.5 kHz burst at full scale (a plosive), clipped at 0 dBFS, over a -60 dB pink floor.
+    With the defaults it measures about -20.6 LUFS with peaks at 0 dBTP, the shape of a hot
+    remote-interview track: lifting it to -14 LUFS in one linear step would put the peaks about
+    8 dB over loudnorm's -1.5 dBTP, so ffmpeg falls back to its dynamic mode."""
+    import numpy as np
+    d = Path(dir)
+    d.mkdir(parents=True, exist_ok=True)
+    rate = _fps(fps)
+    params = {"kind": "peaky", "fps": str(fps), "size": size, "dur": float(dur),
+              "body_db": float(body_db), "span_db": float(span_db), "seed": int(seed), "channels": 2}
+    out = d / ("peaky_%s.mp4" % _key(params))
+    if _cached(out, params):
+        return out
+    rng = np.random.default_rng(seed)
+    n = int(round(dur * SR))
+    t = np.arange(n) / SR
+    voice = np.zeros(n)
+    onsets = []
+    s = 0.3
+    while s < dur - 0.6:
+        length = rng.uniform(0.12, 0.35)
+        lvl = 10 ** (rng.uniform(-span_db, 0.0) / 20.0)
+        a, b = int(s * SR), int((s + length) * SR)
+        f0 = rng.uniform(110.0, 170.0)
+        y = sum((0.8 ** h) * np.sin(2 * np.pi * f0 * h * t[a:b] + rng.uniform(0, 6.28))
+                for h in range(1, 9))
+        k = int(0.015 * SR)
+        env_ = np.ones(b - a)
+        env_[:k] = np.linspace(0.0, 1.0, k)
+        env_[-k:] = np.linspace(1.0, 0.0, k)
+        voice[a:b] += lvl * y * env_
+        onsets.append(s)
+        s += length + rng.uniform(0.04, 0.2)
+    audio = voice / np.max(np.abs(voice)) * 10 ** (body_db / 20.0)
+    m = int(0.004 * SR)
+    burst = np.hanning(m) * np.sin(2 * np.pi * 2500.0 * np.arange(m) / SR)
+    for o in onsets:
+        a = int(o * SR)
+        audio[a:a + m] += burst
+    audio += _pink_noise(n, NOISE_DB, seed=seed + 100)
+    audio = np.clip(audio, -1.0, 1.0)
+    wav = out.with_suffix(".wav")
+    # Written as two identical channels: a mono WAV would be upmixed at -3 dB per channel.
+    pcm = np.clip(np.round(audio * 32767.0), -32768, 32767).astype("<i2")
+    with wave.open(str(wav), "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(SR)
+        wf.writeframes(np.repeat(pcm, 2).tobytes())
+    vtmp = out.with_name(out.stem + ".video.mp4")
+    try:
+        _encode_video(vtmp, _video_filter(size, rate, float(dur), [], False))
+        _mux(out, vtmp, wav, 0.0)
+    finally:
+        for f in (vtmp, wav):
+            if f.exists():
+                f.unlink()
+    meta = {"params": params, "fps": [rate.numerator, rate.denominator], "flash_frames": [],
+            "flash_times": [], "video_start": 0.0, "audio_start": 0.0,
+            "onsets": [round(o, 6) for o in onsets]}
+    Path(str(out) + ".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return out
+
+
 def make_project(dir: Any, source_path: Any, words: Optional[Iterable[Sequence[Any]]] = None) -> Path:
     """Create ``dir/project`` with source.<ext> (symlink), source.json (via probe) and,
     when ``words`` is given, transcript.json. Returns the project path P."""
