@@ -1138,8 +1138,10 @@ def _explicit_shift(project, clip_id: str) -> bool:
 
 def candidate_pool(cands: list[dict], plan: dict, owner) -> tuple[list[dict], str | None]:
     """The candidates the automatic pick may use: with a clip `speaker` and labelled words,
-    only frames while that speaker talks (see same_speaker). Returns (pool, warning or None);
-    when no candidate falls in the speaker's words the whole clip is used, with a warning."""
+    only frames while that speaker talks (see same_speaker). The labels are the transcript's,
+    or the ones clips.json gives with a piece "speaker" (plan._spec_label), so a piece another
+    person speaks is left out. Returns (pool, warning or None); when no candidate falls in the
+    speaker's words the whole clip is used, with a warning."""
     if not owner:
         return cands, None
     runs = speaker_runs(plan)
@@ -1156,7 +1158,8 @@ def make_cover(project, clip_id: str, style: str, fmt: str = "vertical", at_out=
     """Build covers/<clip>__<style>.jpg (+ .grid.jpg, .mobile.jpg, .json) and the candidates sheet.
 
     The automatic frame comes from the clip's own speaker when `clip.speaker` is set and the
-    words carry speaker labels (the claim owner on the cover, not the interviewer)."""
+    words carry speaker labels, from the transcript or a piece "speaker" (the claim owner on
+    the cover, not the interviewer)."""
     from . import plan as plan_mod
     from . import presets
 

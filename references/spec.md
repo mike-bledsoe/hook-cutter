@@ -100,7 +100,7 @@ prefix keeps the order readable: `c01-no-retainers`.
 |---|---|---|---|
 | `ledger` | string | none | the moments.md row id, e.g. `"M07"` (recommended) |
 | `title` | string | none | export file name and manifest title; claim-checked (L13 / G11); also printed on the cover when a vertical clip has neither `cover.headline` nor a hook card |
-| `speaker` | string | none | whose words and claim this is (attribution) |
+| `speaker` | string | none | whose words and claim this is (attribution); QA G16 also counts a word with no speaker label as this person's (a piece `speaker` names someone else) |
 | `kind` | `"cut"` or `"caption_only"` | `"cut"` | a cut from the source, or captions on a finished video |
 | `source_file` | path | none | caption_only only: the finished video (relative to P, or absolute) |
 | `transcript_sha` | string | none | caption_only only: the `sha256` of `P/transcripts/<id>.json` that the `fix` / `emphasis` / `insert` indices were written against. A mismatch is L03 FAIL; without it the clip FAILs L03 once its transcript has been re-made with different words. `--retime` keeps it valid. Never re-renders. On a cut clip the key is an L01 WARN and is ignored (the top-level key pins those) |
@@ -137,6 +137,7 @@ Exactly one of `words` or `time_src`.
 | `gain_db` | number, -12 to 12 | `0` | level change for this piece |
 | `tighten` | bool | `true` | `false` keeps every pause in this piece |
 | `chapter` | string | none | landscape exports: a chapter starts at this piece |
+| `speaker` | string | none | who speaks this piece, for a transcript without speaker labels (a remote call transcribed without `--speakers-vtt`): its words take this label wherever the transcript gives none. Transcript labels still win: a word that carries one keeps it (L01 WARN when some of the piece's words carry another label). An inserted word takes the transcript label of the word it follows when that word has one, else this label. Once any piece of a clip names its speaker, the clip's other unlabelled words take the clip's `speaker`, so set the clip's `speaker` too: without it those words have no label, speaker-follow framing follows this one through them, and it is L01 WARN. QA G16 then checks this piece's framing against this person, speaker-follow framing follows the labels (a `track` mark with no `x` takes the label at its own time), and the automatic cover frame skips a piece someone other than the clip's `speaker` speaks. A label the `speakers` map (when there is one) does not list is L01 WARN; a value that is not a non-empty string is L01 FAIL. Not for a cutaway to a listener: that is `reaction` on the mark |
 | `in_offset`, `out_offset` | whole frames, -60 to 60 | `0` | move the snapped in-edge or out-edge by this many output frames (+ is later), applied after every snap (and after `hold_after`). A frame or two for a stray syllable at a seam (`qa.md`); up to 60 (two seconds at 30 fps) to step over a false start that sits inside the piece's first word (`editing.md` rule 6). Beyond 12 the plan prints an INFO line with the shift in seconds; outside -60 to 60, or not a whole number, is L01 FAIL. Where two pieces that are neighbours in the source share a cut, a trimming offset (`out_offset` below 0 on the first, `in_offset` above 0 on the second) makes a real cut once it leaves a gap; while the two edges still overlap it removes nothing and an L01 INFO says so |
 
 ### Framing mark
@@ -146,8 +147,9 @@ mark, the clip default applies per shot (from `hc shots`): a shot with one face 
 **multi-face shot** (two or more people of similar size, such as a gallery call or a two-shot)
 is letterboxed, never cropped to the largest face; no shots data or no face gives a crop at the
 centre of the picture. Landscape shows the full frame. With a `speakers` map that covers every
-speaker label in the clip, and either no marks or a mark with mode `speaker`, multi-face shots
-follow the speaker turns instead (one window per turn; turns under 1 s or 3 words do not switch).
+speaker label in the clip (the transcript's, or a piece `speaker`), and either no marks or a mark
+with mode `speaker`, multi-face shots follow the speaker turns instead (one window per turn;
+turns under 1 s or 3 words do not switch).
 
 Every crop stays inside the source's picture area: when ingest measured black bars or a gallery
 border (`video.active_area` in `source.json`), crop 1.0 is the largest window inside the picture,
@@ -166,13 +168,14 @@ and letterbox shows and blurs the picture, not the bars.
 ### speakers
 
 `"speakers": {"Ann Lee": {"x": 0.27}, "Ben Ortiz": {"x": 0.75, "y": 0.42}}` at the top level of
-clips.json. Labels are the speaker names in `transcript.md` (from `--speakers-vtt`); `x` and
+clips.json. Labels are the speaker names in `transcript.md` (from `--speakers-vtt`), or, for a
+transcript without labels, the clip's `speaker` and the piece `speaker` names; `x` and
 `y` are the person's face centre as shares of the source frame (read them off
 `sheets/shots_<clip>.jpg`). Set it once per source: framing then follows who is talking in
 multi-face shots, the cover prefers frames of the clip's `speaker`, and QA G16 checks that the
 framed face is the person speaking. `y` also tells apart people stacked in one column: the crop
-follows the face nearest that y, and G16 checks the window's rows. A label no word or clip uses
-is L01 WARN; changing an x re-plans every clip.
+follows the face nearest that y, and G16 checks the window's rows. A label no word, clip or
+piece uses is L01 WARN; changing an x re-plans every clip.
 
 ### insert
 
@@ -213,7 +216,7 @@ A legacy `"text"` with `\N` or `\n` line breaks is accepted and converted.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `headline` | string | the hook card lines, else the clip `title` | cover text with `*accent*` runs; write it to parse cold (`packaging.md`) |
-| `at_out` | `"auto"` or output seconds | `"auto"` | the frame; auto picks the best-scoring candidate among frames of the clip's `speaker` (when words carry speaker labels) |
+| `at_out` | `"auto"` or output seconds | `"auto"` | the frame; auto picks the best-scoring candidate among frames of the clip's `speaker` (when words carry speaker labels: the transcript's, or a piece `speaker`) |
 | `shift` | pixels, 0 or more | `0` | slides the photo up so the face clears the headline (it cannot slide it down). Written explicitly (even `0`), it is kept as you set it; a negative value is L01 FAIL, and `hc cover` treats it as 0 |
 | `lockup` | list of strings or null | `null` | small lines under the headline (a name, a show title the user owns) |
 
@@ -365,6 +368,7 @@ Every key at once, with comments (JSON with comments, for reading; not a valid f
         {"words": [4701, 4811], "role": "setup", "join": "dip", "expect": ["So we had", "the whole year"],
          "in_offset": 0, "out_offset": 0},   // whole frames, -60..60: move a snapped edge
         {"words": [4867, 4890], "role": "close", "hold_after": 0.6, "expect": ["That is why", "shipped it"]},
+        {"words": [4891, 4899], "speaker": "Speaker A", "expect": ["That is the", "for good"]},   // who speaks it (a transcript without labels)
         {"time_src": ["1:02:03.40", "1:02:05.00"], "role": "reaction"}
       ],
       "omit": [4730, 4731],                    // removed from audio + captions

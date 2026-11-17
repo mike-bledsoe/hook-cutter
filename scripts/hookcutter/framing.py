@@ -403,11 +403,26 @@ def speaker_map(plan: dict) -> dict:
     return out
 
 
+def _labelled_in_order(plan: dict) -> list:
+    """The plan's visible words with a speaker label, in output order. Words that start together
+    keep transcript order; an inserted word (no transcript index) sorts right after the
+    transcript word before it in the plan's word list, as the captions order them."""
+    rows, last_i = [], -1
+    for n, w in enumerate((plan or {}).get("words") or []):
+        i = w.get("i")
+        order = last_i + 0.5 if i is None else int(i)
+        if i is not None:
+            last_i = int(i)
+        if _visible(w) and w.get("sp") and w.get("s_out") is not None:
+            rows.append((w["s_out"], order, n, w))
+    rows.sort(key=lambda r: r[:3])
+    return [r[3] for r in rows]
+
+
 def clip_labels(plan: dict) -> list:
     """Speaker labels of the plan's visible words, in order of first appearance."""
     seen = []
-    for w in sorted((w for w in (plan or {}).get("words") or [] if _visible(w) and w.get("sp")
-                     and w.get("s_out") is not None), key=lambda w: (w["s_out"], w["i"])):
+    for w in _labelled_in_order(plan):
         if w["sp"] not in seen:
             seen.append(w["sp"])
     return seen
@@ -425,8 +440,7 @@ def speaker_turns(plan: dict) -> list:
     (output time) or TURN_MIN_WORDS words is absorbed into the previous turn (an interjection
     such as "Yeah." does not switch). Turn 0 starts at -inf; every later turn switches
     TURN_LEAD before its first word, or exactly at a join when one is within TURN_SNAP."""
-    ws = sorted((w for w in (plan or {}).get("words") or [] if _visible(w) and w.get("sp")
-                 and w.get("s_out") is not None), key=lambda w: (w["s_out"], w["i"]))
+    ws = _labelled_in_order(plan)
     runs = []
     for w in ws:
         if runs and runs[-1][0] == w["sp"]:

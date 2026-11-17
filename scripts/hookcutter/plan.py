@@ -662,7 +662,7 @@ def plan_clip(spec: dict, clip_id: str, transcript: dict, source: dict, energy,
                    "sar": video.get("sar"), "active_area": video.get("active_area")},
         "eff": clip.get("_eff"),
         "speakers": _speakers(spec),
-        "pieces": _piece_records(recs, segs, G, W, ctx.omit),
+        "pieces": _piece_records(recs, segs, G, W, ctx.omit, ctx),
         "segments": segs, "removals": removals, "joins": joins, "words": words,
         "intent": intent, "inserts": inserts,
         "duration_out": round(dur, 6), "frames_out": frames_out,
@@ -1061,6 +1061,18 @@ def _seg_lookup(segs_p: list, t: float, starts: list | None = None):
     return None
 
 
+def _spec_label(ctx: _Ctx, r: dict):
+    """(label, where from) for the piece's words the transcript left unlabelled: the piece's
+    "speaker", else the clip's "speaker" once any piece of the clip names one (a transcript
+    without labels then reads as the pieces say), else (None, None). Transcript labels win."""
+    lab = (r.get("p") or {}).get("speaker")
+    if lab:
+        return lab, "piece"
+    if ctx.clip.get("speaker") and any(p.get("speaker") for p in ctx.clip.get("pieces") or []):
+        return ctx.clip["speaker"], "clip"
+    return None, None
+
+
 def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
     W, N = ctx.W, ctx.N
     by_piece: dict = {}
@@ -1083,6 +1095,7 @@ def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
         lo = bisect.bisect_left(ctx._starts, ps0 - 30.0)
         hi = bisect.bisect_left(ctx._starts, ps1)
         cands = set(range(lo, hi)) | r["idxset"]
+        fill, fill_from = _spec_label(ctx, r)
         for i in sorted(cands, key=lambda j: (W[j]["s"], j)):
             w = W[i]
             in_piece = i in r["idxset"]
@@ -1097,6 +1110,8 @@ def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
                    "omitted": omitted, "removed": False}
             if not in_piece:
                 rec["edge"] = True
+            elif fill and not rec["sp"]:
+                rec["sp"], rec["sp_from"] = fill, fill_from
             mid = (w["s"] + max(w["e"], w["s"])) / 2
             seg_s, seg_m = _seg_lookup(segs_p, w["s"], starts), _seg_lookup(segs_p, mid, starts)
             nk = bisect.bisect_left(starts, w["s"] - EPS)
@@ -1145,10 +1160,10 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
     the inserted tokens placed in time order inside their piece, plan["inserts"]).
 
     An inserted token is a plan word with `i` None and `ins` = the insert's number: it is
-    heard, captioned and timed like any word, has no transcript index and no speaker label, and
-    is never addressed by fix / emphasis / omit / verbatim. The whole `src` span must lie in one
-    kept segment of the piece that holds `after` (tighten protects it; an omit or a piece edge
-    that cuts through it is an L01 FAIL)."""
+    heard, captioned and timed like any word, has no transcript index and no speaker label but
+    the one clips.json gives its piece (_spec_label; the transcript label of the `after` word
+    wins there, as on any word), and is never addressed by fix / emphasis / omit / verbatim. The whole `src` span must lie in one kept segment of the piece that holds
+    `after` (tighten protects it; an omit or a piece edge that cuts through it is an L01 FAIL)."""
     if not ctx.inserts:
         return words, []
     by_piece: dict = {}
@@ -1183,6 +1198,9 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
             continue
         r, sg = hit
         toks = insert_tokens(ins["text"], s, e)
+        fill, fill_from = _spec_label(ctx, r)
+        if fill and 0 <= after < ctx.N and ctx.W[after].get("sp"):
+            fill, fill_from = ctx.W[after]["sp"], "after"   # the transcript labels its turn
         for tok, a, b in toks:
             a_c, b_c = max(a, sg["src"][0]), min(b, sg["src"][1])
             extra.setdefault(r["n"], []).append({
@@ -1190,8 +1208,9 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
                 "s_src": round(a, 4), "e_src": round(b, 4),
                 "s_out": round(sg["out"][0] + (a_c - sg["src"][0]), 4),
                 "e_out": round(sg["out"][0] + (max(b_c, a_c) - sg["src"][0]), 4),
-                "piece": r["n"], "seg": sg["k"], "sp": None, "filler": False, "hidden": False,
-                "omitted": False, "removed": False, "_after": after, "_s0": round(s, 4)})
+                "piece": r["n"], "seg": sg["k"], "sp": fill, "filler": False, "hidden": False,
+                "omitted": False, "removed": False, "_after": after, "_s0": round(s, 4),
+                **({"sp_from": fill_from} if fill else {})})
         meta.append({"n": n, "after": after, "tokens": [t for t, _a, _b in toks],
                      "src": [round(s, 4), round(e, 4)], "piece": r["n"]})
     if not extra:
@@ -1233,15 +1252,17 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
     return out, meta
 
 
-def _piece_records(recs: list, segs: list, G: Grid, W: list = (), omit=frozenset()) -> list:
+def _piece_records(recs: list, segs: list, G: Grid, W: list = (), omit=frozenset(),
+                   ctx: _Ctx | None = None) -> list:
     out = []
     for r in recs:
         mine = [s for s in segs if s["piece"] == r["n"]]
         p = r["p"]
         first, last = r["runs"][0], r["runs"][-1]
         labels = []
+        fill = _spec_label(ctx, r)[0] if ctx is not None else None
         for i in r["idxs"]:
-            sp = W[i].get("sp") if 0 <= i < len(W) else None
+            sp = (W[i].get("sp") or fill) if 0 <= i < len(W) else None
             if sp and sp not in labels and not (r["type"] == "words" and i in omit):
                 labels.append(sp)
         out.append({
@@ -2242,8 +2263,10 @@ def transcript_changed(plan: dict, transcript: dict | None) -> bool:
     or another speaker label on a word the plan uses. The sha does not cover labels (it pins
     word indices and must not move when a label is corrected), so the labels are compared with
     the ones the plan itself recorded: every label a plan uses (words[].sp, pieces[].speakers,
-    the speaker turns framing follows) comes from those words. Inserted words (i None) have no
-    transcript word. For a caption_only plan pass the clip's own transcript."""
+    the speaker turns framing follows) comes from those words. A label clips.json gave a word
+    the transcript left unlabelled (`sp_from`, see _spec_label) stands for no transcript label.
+    Inserted words (i None) have no transcript word. For a caption_only plan pass the clip's
+    own transcript."""
     tr = transcript or {}
     if (plan or {}).get("transcript_sha") != tr.get("sha256"):
         return True
@@ -2251,7 +2274,8 @@ def transcript_changed(plan: dict, transcript: dict | None) -> bool:
     for w in (plan or {}).get("words") or []:
         i = w.get("i")
         if isinstance(i, int) and not isinstance(i, bool):
-            if not 0 <= i < len(words) or w.get("sp") != words[i].get("sp"):
+            own = None if w.get("sp_from") else w.get("sp")
+            if not 0 <= i < len(words) or own != words[i].get("sp"):
                 return True
     return False
 
