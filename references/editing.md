@@ -227,13 +227,16 @@ piece later. Fillers ("um", "uh") are removed by tightening automatically.
 
 A false start can hide inside one transcript word: "and after a... after about a decade" may be
 stored as three words, the second "after" folded into "about" (lint L15 `false_start` names such
-words). No index separates the two attempts, so `omit` and `words[0]` cannot cut between them.
+words, and L21 a word that sounds too long for its text, flagged or not). No index separates the
+two attempts, so `omit` and `words[0]` cannot cut between them.
 Start the piece on the folded word and push its in-edge past the first attempt with
 `in_offset`: whole output frames, up to 60 (two seconds at 30 fps), + is later. Read the source
 times in `hc words`, convert the gap to frames, re-plan, and check the first caption page and
 G5: the opening must be the second attempt, whole. The plan prints an INFO line with the shift
 in seconds; L04 no longer measures the opening against the word you stepped over, and the
-`false_start` WARN clears once the first attempt is out of the clip. The words piece is still
+`false_start` WARN clears once the first attempt is out of the clip. L21 stays until a `fix` on
+the word says what is heard from the edge on, the text itself when nothing else is left: an edge
+past "I did a," inside a word stamped "built" still leaves "I built". The words piece is still
 tightened and snapped at its out-edge like any other: set `"tighten": false` on it (or a
 `verbatim` range) when a pause inside it has to stay.
 

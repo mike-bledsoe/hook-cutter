@@ -87,6 +87,14 @@ DEAD_AIR_START = 0.25    # L18: ... at the clip start
 DEAD_AIR_LOOK = 1.0      # L18: onset search window
 HOLE_WARN = 1.5          # L19: uncovered voiced audio this long WARNs ...
 HOLE_FAIL = 3.0          # ... and this long FAILs (unless a transcript flag covers it)
+HIDDEN_EDGE = 0.5        # L21: words and sound this far outside a kept segment are checked too
+HIDDEN_BASE = 0.30       # L21 (a): a word may sound for base + per letter of its text ...
+HIDDEN_PER_LETTER = 0.06  # ... (a digit counts as 3 letters: "190" is said "one ninety") ...
+HIDDEN_INTO = 0.05       # ... and is suspect only when the next word starts this close after it
+HIDDEN_GAP = 0.20        # L21 (b): a gap between two words this long ...
+HIDDEN_GAP_SHARE = 0.8   # ... with this share of its frames at speech level (align.speech_share)
+HIDDEN_RUN = 0.30        # L21 (c): wordless sound this long (and shorter than HOLE_WARN) ...
+HIDDEN_RUN_DB = 18.0     # ... whose median lies within this of the local speech level
 HOOK_RATIO_MIN = 1.3     # L20: the hook card should set at least this much larger than captions
 HOOK_AUTO = (0.5, 20.0, 1.5, 3.0)    # dur = clamp(a + chars / b, lo, hi)
 EPS = 1e-6
@@ -1615,10 +1623,12 @@ def _lints(ctx, spec, cid, transcript, source, plan, recs, shots) -> list:
         L("L17", lvl, f"pieces[{i}] and pieces[{j}] share {' / '.join(what)}: the audience "
           "hears it twice", _seg_out_start(plan, j))
 
-    # L18 dead air at a segment start, L19 speech with no transcript words
+    # L18 dead air at a segment start, L19 speech with no transcript words, L21 speech the
+    # transcript may have folded into a word or dropped
     if E is not None:
         _lint_dead_air(ctx, plan, recs, L)
         _lint_holes(ctx, plan, recs, transcript, L)
+        _lint_hidden(ctx, plan, transcript, L)
     return out
 
 
@@ -1826,6 +1836,108 @@ def _lint_holes(ctx, plan, recs, transcript, L) -> None:
               "re-run hc transcribe (it re-listens to gaps) or keep it out of the clip", at)
 
 
+def _spoken_letters(raw: str) -> int:
+    """Letters it takes to say a word: a digit counts as 3 ("190" is "one ninety")."""
+    return max(1, sum(1 for ch in raw if ch.isalpha()) + 3 * sum(1 for ch in raw if ch.isdigit()))
+
+
+def _lint_hidden(ctx, plan, transcript, L) -> None:
+    """L21: speech the transcript may have folded into a neighbouring word or dropped, inside
+    the clip and up to HIDDEN_EDGE outside every kept segment (where a cut decides what is
+    heard). (a) A word whose voiced length is far beyond what its text takes to say and that
+    runs straight into the next word: a restart or a filler stamped as one token ("I'm in a,
+    I'm in a" as one 'a'); a drawn word before a pause is ordinary speech. (b) A gap between
+    two words of HIDDEN_GAP or more that sounds at speech level across most of it: a filler or
+    a word with no token, or a mis-timed edge. (c) Wordless sound at speech level from
+    HIDDEN_RUN up to L19's HOLE_WARN. Speech level is relative to the speech around it, so a
+    breath on a quiet recording is not counted. The energy track cannot say what was said; a
+    slice transcription can. The editor's answer settles it: an `insert` over the stretch, or a
+    `fix` on the word (for a gap or wordless sound: on the word after it, which then carries
+    what was heard). An `in_offset` that steps over a restart inside the word does not settle
+    (a): what is left after the edge can still hold more than the text ("I did a, I built"
+    stamped 'built', the edge past "I did a," leaves "I built"), so the `fix` says what is
+    heard from the edge on. (a) also reads words a `false_start` or `timing_uncertain` flag
+    marks (the flag can name one restart while the word holds more); sound that L15 (an
+    `unworded_audio` or `dropout` flag) or L19 already reports is not repeated."""
+    from . import align
+    E, W, N = ctx.E, ctx.W, ctx.N
+    segs = _union([tuple(s["src"]) for s in plan["segments"]])
+    if not segs or not N:
+        return
+    near = _Prot([(a - HIDDEN_EDGE, b + HIDDEN_EDGE) for a, b in segs])
+    win = near.m
+    typed = _insert_spans(plan)
+    kept = set(plan["intent"])
+    told = [(float(f["s"]), float(f["e"])) for f in transcript.get("flags") or []
+            if f.get("kind") in TIME_FLAGS and isinstance(f.get("s"), (int, float))
+            and isinstance(f.get("e"), (int, float))
+            and _overlap([(float(f["s"]), float(f["e"]))], segs) > 0]
+    lo = bisect.bisect_left(ctx._starts, win[0][0] - 30.0)
+    hi = min(N, bisect.bisect_left(ctx._starts, win[-1][1]) + 1)
+    fmt = specmod.fmt_time
+    found = []                         # (src a, src b, message)
+    claimed = []                       # sound L19 or L15 names: (b) skips it, as it skips (c)'s
+
+    def around(k0, k1, t0=math.inf, t1=-math.inf):
+        a, b = min(float(W[k0]["s"]), t0), max(float(W[k1]["e"]), t1)
+        return (f"slice-transcribe src {fmt(a)}-{fmt(b)} (from a pause to a pause) before "
+                "trusting the words")
+
+    # (c) wordless sound at speech level, below L19's length
+    spans = W[lo:hi] + [{"s": x, "e": y} for x, y in typed]
+    spans.sort(key=lambda w: (w["s"], w["e"]))
+    for a, b in win:
+        for hs, he in align.uncovered_voiced(E, spans, a, b, min_run=HIDDEN_RUN):
+            if _overlap([(hs, he)], segs) >= HOLE_WARN - EPS or _overlap([(hs, he)], told) > 0:
+                claimed.append((hs, he))
+                continue
+            k = bisect.bisect_left(ctx._starts, hs)
+            if str(k) in ctx.fix or align.speech_share(E, hs, he, HIDDEN_RUN_DB) < 0.5:
+                continue
+            pw = f" after {W[k - 1]['w']!r}" if k > 0 else ""
+            nw = f" before {W[k]['w']!r}" if k < N else ""
+            why = (f"L19 starts at {HOLE_WARN:g} s" if he - hs < HOLE_WARN - EPS else
+                   f"{_overlap([(hs, he)], segs):.2f} s of it inside the clip, under L19's "
+                   f"{HOLE_WARN:g} s")
+            found.append((hs, he, f"{he - hs:.1f} s of sound at speech level with no words "
+                          f"at src {fmt(hs)}{pw}{nw} ({why}): speech the transcript dropped, or "
+                          "a word stamped somewhere else; "
+                          + around(max(k - 1, 0), min(k, N - 1), hs, he)))
+    # (b) a gap between two words that sounds at speech level
+    for i in range(max(lo, 1), hi):
+        a, b = float(W[i - 1]["e"]), float(W[i]["s"])
+        if b - a < HIDDEN_GAP - EPS or near.clear(a, b) or _overlap([(a, b)], typed) > 0 \
+                or str(i) in ctx.fix \
+                or any(x < b and y > a for x, y, *_m in claimed + found):
+            continue
+        if align.speech_share(E, a, b) >= HIDDEN_GAP_SHARE:
+            found.append((a, b, f"the {b - a:.2f} s between {W[i - 1]['w']!r} and "
+                          f"{W[i]['w']!r} at src {fmt(a)} sounds like speech but holds no word: a "
+                          "filler or word the transcript dropped, or a mis-timed edge; "
+                          + around(i - 1, i)))
+    # (a) a word far longer than its text, running straight into the next word
+    for i in range(lo, min(hi, N - 1)):
+        w, nw = W[i], W[i + 1]
+        s, e = float(w["s"]), float(w["e"])
+        if near.clear(s, e) or str(i) in ctx.fix or ctx.filler(i):
+            continue
+        te = ctx.te(i)
+        if _overlap([(s, te)], typed) > 0:
+            continue
+        lim = HIDDEN_BASE + HIDDEN_PER_LETTER * _spoken_letters(w["w"])
+        if te - s <= lim or float(nw["s"]) - te > HIDDEN_INTO:
+            continue
+        v = _voiced_s(E, s, te, E.floor(s))
+        if v > lim:
+            cap = " (its caption would show one word for several)" if i in kept else ""
+            found.append((s, te, f"word {i} {w['w']!r} at src {fmt(s)} sounds for "
+                          f"{te - s:.2f} s, long for its text, and runs straight into "
+                          f"{nw['w']!r}: a restart or a filler may be folded into it{cap}; "
+                          + around(max(i - 1, 0), i + 1)))
+    for a, _b, msg in sorted(found, key=lambda f: f[0]):
+        L("L21", "WARN", msg, _out_near(plan, a))
+
+
 def _flag_msg(f: dict, a, b, t_src=None) -> str:
     kind = f.get("kind", "flag")
     if kind == "false_start":
@@ -1863,13 +1975,19 @@ def _flag_msg(f: dict, a, b, t_src=None) -> str:
 
 
 def _out_near(plan, t_src):
+    """Output time of t_src; for a time no segment plays, the out time of the segment edge
+    nearest it in the source (a start after it or an end before it), so a lint about a stretch
+    just outside a piece points at that piece even when a later passage plays first."""
     v = out_time(plan, t_src)
     if v is not None:
         return v
+    best = None
     for s in plan["segments"]:
-        if s["src"][0] >= t_src:
-            return s["out"][0]
-    return plan["duration_out"]
+        a, b = s["src"]
+        for d, at in ((a - t_src, s["out"][0]), (t_src - b, s["out"][1])):
+            if d >= 0 and (best is None or d < best[0]):
+                best = (d, at)
+    return best[1] if best is not None else plan["duration_out"]
 
 
 def _seg_out_start(plan, piece_n):
