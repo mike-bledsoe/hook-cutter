@@ -210,7 +210,7 @@ A legacy `"text"` with `\N` or `\n` line breaks is accepted and converted.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `headline` | string | the hook card lines, else the clip `title` | cover text with `*accent*` runs; write it to parse cold (`packaging.md`) |
-| `at_out` | `"auto"` or output seconds | `"auto"` | the frame; auto picks the best-scoring candidate among frames of the clip's `speaker` (when words carry speaker labels) |
+| `at_out` | `"auto"` or output seconds | `"auto"` | the frame; auto picks the best-scoring candidate among frames of the clip's `speaker` (when words carry speaker labels). A time names the frame that starts nearest to it (a half frame goes to the later one), so a frame time written with three decimals is that frame. It is an output time: after an edge before it moves it shows another source frame, and `hc cover` prints a WARN with both source times |
 | `shift` | pixels, 0 or more | `0` | slides the photo up so the face clears the headline (it cannot slide it down). Written explicitly (even `0`), it is kept as you set it; a negative value is L01 FAIL, and `hc cover` treats it as 0 |
 | `lockup` | list of strings or null | `null` | small lines under the headline (a name, a show title the user owns) |
 

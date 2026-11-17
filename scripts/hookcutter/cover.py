@@ -628,7 +628,9 @@ def compose(photo: Image.Image, faces: list[dict], headline: str, cfg: dict, *,
     """Compose a 1080x1920 cover from a clean frame and its faces (photo coordinates).
 
     Returns (image, info) with info {headline_box, text_box, size, lines, shift, face_box,
-    faces, crown_y, crown_method, font_fallback, line_contrast, warnings}. `shift_manual` keeps
+    faces, crown_y, crown_method, font_fallback, size_fallback, line_contrast, warnings}.
+    `size_fallback` is the fit's note when the headline needed a size below the preset's range
+    (or more lines than max_lines); `font_fallback` stays False. `shift_manual` keeps
     base_shift exactly (an explicit cover.shift). The shift only slides the photo up: a negative
     base_shift counts as 0, so the recorded face position is always the one in the picture. The
     tint is anchored to the headline and
@@ -757,8 +759,11 @@ def compose(photo: Image.Image, faces: list[dict], headline: str, cfg: dict, *,
             "size": layout["size"] if layout else None, "lines": layout["lines"] if layout else [],
             "shift": int(shift), "shift_manual": bool(shift_manual), "face_box": face_box,
             "faces": [f["box"] for f in shifted], "crown_y": crown, "crown_method": crown_method,
-            "font_fallback": bool(fit.get("fallback")), "line_contrast": contrast,
-            "warnings": warnings}
+            # the headline is always set in the preset's own face (a missing face or glyph stops
+            # the cover): font_fallback names no typeface. A size fit below the preset's range is
+            # size_fallback, and one of the warnings.
+            "font_fallback": False, "size_fallback": fit.get("fallback") or None,
+            "line_contrast": contrast, "warnings": warnings}
     return img, info
 
 
@@ -1189,9 +1194,12 @@ def make_cover(project, clip_id: str, style: str, fmt: str = "vertical", at_out=
         if not 0 <= t < max(duration, 1e-6):
             raise env.HCError(f"{clip_id}: cover time {t:.2f}s is outside the clip (0 to {duration:.2f}s)", code=1)
         num, den = cf._fps(plan)
-        # the frame the time names (a time copied from a cover json maps back to its own
-        # frame); `hc status` floors the same way (cli.cover_stale_reasons)
-        t = round(cf.frame_index(t, (num, den)) * den / num, 6)
+        # the frame the time names: the nearest frame start (a time copied from a cover json
+        # maps back to its own frame, and 35.458 at 24 fps is frame 851, not 850), never past
+        # the last frame; `hc status` rounds the same way (cli.cover_stale_reasons)
+        n = cf.nearest_frame(t, (num, den))
+        last = int(plan.get("frames_out") or round(duration * num / den)) - 1
+        t = round(max(0, min(n, last)) * den / num, 6)
         manual = True
     elif pick in (None, "auto"):
         t, manual = best["at_out"], False
@@ -1257,6 +1265,7 @@ def make_cover(project, clip_id: str, style: str, fmt: str = "vertical", at_out=
         "headline": headline, "headline_box": info["headline_box"], "text_box": info["text_box"],
         "ink_box": info["text_box"], "size": info["size"], "lines": info["lines"],
         "line_contrast": info["line_contrast"], "font_fallback": info["font_fallback"],
+        "size_fallback": info["size_fallback"],
         "shift": info["shift"], "shift_manual": info["shift_manual"],
         "band": list(cfg["band"]), "frame_source": origin,
         "hdr_tonemapped": True if hdr else None, "candidates": top,
@@ -1264,8 +1273,30 @@ def make_cover(project, clip_id: str, style: str, fmt: str = "vertical", at_out=
         "files": {"main": _rel(project, main), "grid": _rel(project, grid_p), "mobile": _rel(project, mob_p)},
         "spec_hash": plan.get("spec_hash"), "created": _now(), "warnings": warnings,
     }
+    if manual:
+        _warn_moved_frame(clip_id, style, json_p, t, out["at_src"], plan)
     env.write_json(json_p, out)
     return out
+
+
+def _warn_moved_frame(clip_id: str, style: str, json_p: Path, t: float, at_src, plan: dict) -> None:
+    """cover.at_out is an output time: when an edge before it moved, the same time shows
+    another source frame. Say so (with both source times) when the cover on disk was made at
+    this output time from a frame half a frame or more away. Printed, not stored: the next
+    run at this time has nothing to say."""
+    try:
+        old = env.read_json(json_p) if json_p.is_file() else None
+        num, den = cf._fps(plan)
+        if not isinstance(old, dict) or at_src is None or old.get("at_src") is None \
+                or abs(float(old["at_out"]) - t) >= 1e-3:
+            return
+        was = float(old["at_src"])
+    except (env.HCError, KeyError, TypeError, ValueError, ZeroDivisionError):
+        return
+    if abs(float(at_src) - was) >= 0.5 * den / num:
+        env.log("cover", f"WARN {clip_id} [{style}]: the cover time {t:.3f}s now shows source frame "
+                         f"{float(at_src):.3f}s, not {was:.3f}s as when this cover was last made (an edge "
+                         "before it moved): check the cover, or set cover.at_out again")
 
 
 def _src_exact(plan: dict, t: float):

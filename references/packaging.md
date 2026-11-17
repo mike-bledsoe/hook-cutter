@@ -80,7 +80,11 @@ pick and the sheet, and when you force one with `cover.at_out` the cover json wa
   someone else.
 - Head-and-shoulders scale beats a wide shot.
 - Record the choice as `cover.at_out` (output seconds) or run `hc cover P CLIP --at SECONDS`
-  (`--at` also takes `0:12.4`).
+  (`--at` also takes `0:12.4`). A time names the frame that starts nearest to it, so the
+  `at_out` a cover json records, or a frame time written with three decimals, maps back to its
+  own frame. `at_out` is an output time: when you move an edge before it, the same time shows
+  another source frame. `hc cover` then warns with the source time it shows now and the one it
+  showed last time: look at the cover again, or set `at_out` again.
 - A cover made before the clip is rendered, or after a clips.json edit that is not rendered
   yet, is cut from the source with a framing estimate and says so (`frame_source: source` in the
   cover json, and a warning G12 repeats): render first for the exact frame.

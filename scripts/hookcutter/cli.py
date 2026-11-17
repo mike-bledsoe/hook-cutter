@@ -40,8 +40,8 @@ COMMANDS = {
 # Commands that read the source media through source.json: they stop when the file changed
 # since ingest (ingest, status, find, words, export, doctor and test never decode it).
 SOURCE_BOUND = ("transcribe", "shots", "peek", "plan", "render", "cover", "qa", "all")
-# Frames of slack when a cover time is floored to its frame. Must stay equal to
-# cover_frames.FRAME_TOL (hc cover floors with it); kept as a copy here so `hc status` does
+# Frames of slack when a cover time is rounded to its frame. Must stay equal to
+# cover_frames.FRAME_TOL (hc cover rounds with it); kept as a copy here so `hc status` does
 # not import the numpy-bearing cover modules. tests/test_codex_fg.py pins the two together.
 COVER_FRAME_TOL = 1e-3
 STAMPS_FILE = "all-stamps.json"
@@ -718,10 +718,16 @@ def cover_stale_reasons(proj: Any, clip: Dict[str, Any], raw_clip: Dict[str, Any
         try:
             num, den = (int(x) for x in (plan or {}).get("fps") or (0, 0))
             if num > 0 and den > 0:
-                # hc cover floors the time to its frame: the same expression as
-                # cover_frames.frame_index, then the rounding cover.make_cover stores
+                # hc cover rounds the time to its nearest frame, never past the last one: the
+                # same expression as cover_frames.nearest_frame, the clamp and the rounding
+                # cover.make_cover stores
                 import math
-                t = round(int(math.floor(t * num / den + COVER_FRAME_TOL)) * den / num, 6)
+                n = int(math.floor(t * num / den + 0.5 + COVER_FRAME_TOL))
+                frames = (plan or {}).get("frames_out") or \
+                    round(float((plan or {}).get("duration_out") or 0) * num / den)
+                if frames:
+                    n = max(0, min(n, int(frames) - 1))
+                t = round(n * den / num, 6)
         except (TypeError, ValueError):
             pass
         try:
