@@ -178,6 +178,20 @@ class HostPieceOnTheHostsTile(unittest.TestCase):
         guest = [w for w in plan["words"] if w["piece"] == 0 and w["i"] is not None and not w.get("edge")]
         self.assertTrue(guest and all((w["sp"], w["sp_from"]) == ("Guest", "clip") for w in guest))
 
+    def test_an_insert_takes_the_transcript_label_of_the_word_it_follows(self):
+        """Where the transcript labels the word an insert follows, the insert takes that label
+        (the speech is that speaker's), not the piece key: no one-word turn mid-sentence."""
+        ws = words()
+        ins = [{"after": 14, "text": "really", "src": [ws[14][2] + 0.01, ws[15][1] - 0.01]}]
+        plan = build(clip(insert=ins), labels={k: "Guest" for k in range(24)})[0]
+        got = [(w["text"], w["sp"]) for w in plan["words"] if w.get("ins") is not None]
+        self.assertEqual(got, [("really", "Guest")])
+        self.assertEqual(plan["pieces"][1]["speakers"], ["Guest"])
+        # with no key anywhere an insert has no label, as before
+        plan = build(clip(host_key=False, insert=ins), labels={k: "Guest" for k in range(24)})[0]
+        got = [(w["text"], w["sp"]) for w in plan["words"] if w.get("ins") is not None]
+        self.assertEqual(got, [("really", None)])
+
     def test_a_mismatch_on_unlabelled_words_names_the_piece_key(self):
         c = clip(host_key=False)
         _st, notes, _ = g16(build(c)[0], c)
@@ -241,6 +255,51 @@ class SpeakerFramingFollowsThePiece(unittest.TestCase):
         self.assertEqual(win.get("speaker"), "Host")
         st, notes, _ = qa.framing_attribution(plan, c, SHOTS, wins, SPEAKERS, W / H)
         self.assertEqual(st, "PASS", notes)
+
+    def test_an_insert_that_starts_with_the_next_word_frames(self):
+        """An inserted word (no transcript index) that starts at the same output time as a
+        transcript word: once the key labels it, ordering the labelled words must not compare
+        its missing index with a number (hc render crashed with a TypeError)."""
+        ws = words()
+        for mode in ("speaker", None):
+            marks = [{"at_src": 0.0, "mode": "speaker"}] if mode else None
+            c = clip(framing_marks=marks,
+                     insert=[{"after": 13, "text": "like", "src": [ws[14][1], ws[14][1] + 0.08]}])
+            if marks is None:
+                c.pop("framing")
+            plan = build(c)[0]
+            self.assertFalse(lints(plan, "", "FAIL"), plan["lints"])
+            ins = next(w for w in plan["words"] if w.get("ins") is not None)
+            tie = next(w for w in plan["words"] if w["i"] == 14)
+            self.assertEqual((ins["s_out"], ins["sp"]), (tie["s_out"], "Host"))
+            self.assertEqual(framing.clip_labels(plan), ["Guest", "Host"])
+            self.assertTrue(framing.follow_ok(plan))
+            turns = framing.speaker_turns(plan)
+            self.assertEqual([t["sp"] for t in turns], ["Guest", "Host"])
+            # an inserted word sorts right after the transcript word before it in the plan
+            self.assertEqual(turns[1]["words"][:4], [12, 13, 14, None])
+            tracks = framing.build_tracks(plan, c, SHOTS, SOURCE, "vertical", PRESET)
+            wins = framing.windows(tracks, plan, SOURCE)
+            st, notes, _ = qa.framing_attribution(plan, c, SHOTS, wins, SPEAKERS, W / H)
+            self.assertEqual(st, "PASS", (mode, notes))
+
+    def test_a_piece_speaker_without_a_clip_speaker_warns_and_still_fails(self):
+        """With no clip "speaker" the other pieces' words stay unlabelled and speaker-follow
+        framing follows the one label through them: L01 says so, and G16 still FAILs."""
+        c = clip(speaker=None, framing_marks=[{"at_src": 0.0, "mode": "speaker"}])
+        plan = build(c)[0]
+        got = lints(plan, "has no \"speaker\"", "WARN")
+        self.assertEqual(len(got), 1, plan["lints"])
+        self.assertIn("pieces[1]", got[0]["msg"])
+        st, notes, _ = g16(plan, c)
+        self.assertEqual(st, "FAIL", notes)
+        self.assertTrue(any("no speaker labels or clip speaker" in n for n in notes), notes)
+        # a clip speaker, or no piece key, and there is no such warning
+        self.assertFalse(lints(build(clip())[0], "has no \"speaker\""))
+        self.assertFalse(lints(build(clip(speaker=None, host_key=False))[0], "has no \"speaker\""))
+        one = clip(speaker=None)
+        one["pieces"] = one["pieces"][1:]           # every piece names its speaker
+        self.assertFalse(lints(build(one)[0], "has no \"speaker\""))
 
     def test_no_piece_speaker_keeps_the_letterbox(self):
         c = clip(host_key=False, framing_marks=[{"at_src": 0.0, "mode": "speaker"}])

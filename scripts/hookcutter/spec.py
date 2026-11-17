@@ -896,6 +896,13 @@ def normalize_clip(cid, raw, defaults: dict) -> dict:
         else:
             c["pieces"] = [_norm_piece(p, n, iss) for n, p in enumerate(pieces_raw)]
             c["pieces"][0]["join"] = "cut"
+            keyed = [n for n, p in enumerate(c["pieces"]) if p.get("speaker")]
+            if keyed and len(keyed) < len(c["pieces"]) and not c["speaker"]:
+                n = keyed[0]
+                iss.warn(f"pieces[{n}].speaker {c['pieces'][n]['speaker']!r} is set but the clip "
+                         "has no \"speaker\": the other pieces' unlabelled words have no speaker, "
+                         "so speaker-follow framing follows the piece's label through them and "
+                         "QA G16 cannot check them; set the clip's \"speaker\"")
     if kind == "cut":
         c["omit"] = _norm_index_list(raw.get("omit"), iss, "omit")
         c["verbatim"] = _norm_ranges(raw.get("verbatim"), iss, "verbatim")

@@ -1163,8 +1163,8 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
 
     An inserted token is a plan word with `i` None and `ins` = the insert's number: it is
     heard, captioned and timed like any word, has no transcript index and no speaker label but
-    the one clips.json gives its piece (_spec_label), and is never addressed by fix / emphasis /
-    omit / verbatim. The whole `src` span must lie in one kept segment of the piece that holds
+    the one clips.json gives its piece (_spec_label; the transcript label of the `after` word
+    wins there, as on any word), and is never addressed by fix / emphasis / omit / verbatim. The whole `src` span must lie in one kept segment of the piece that holds
     `after` (tighten protects it; an omit or a piece edge that cuts through it is an L01 FAIL)."""
     if not ctx.inserts:
         return words, []
@@ -1201,6 +1201,8 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
         r, sg = hit
         toks = insert_tokens(ins["text"], s, e)
         fill, fill_from = _spec_label(ctx, r)
+        if fill and 0 <= after < ctx.N and ctx.W[after].get("sp"):
+            fill, fill_from = ctx.W[after]["sp"], "after"   # the transcript labels its turn
         for tok, a, b in toks:
             a_c, b_c = max(a, sg["src"][0]), min(b, sg["src"][1])
             extra.setdefault(r["n"], []).append({
