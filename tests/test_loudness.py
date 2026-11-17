@@ -2,20 +2,23 @@
 
 A source whose peaks already sit at 0 dBFS cannot be lifted to -14 LUFS by one linear gain
 without pushing them past loudnorm's -1.5 dBTP, so ffmpeg drops to its dynamic mode, which lands
-short: about -15.3 LUFS on a 75-minute 720p remote interview, and every clip from it was held at
-export. The renderer now fits a pre-gain and a limiter for such a source and keeps the linear
-step; a source that already normalises in linear mode keeps the exact filter graph it had, and a
-source that would need more limiting than LIMIT_MAX_DB keeps it too (G7 still fails on it).
+short. On a 75-minute 720p remote interview every clip fell to dynamic mode: one of twelve landed
+at -15.3 LUFS and was held at export, the other eleven passed G7 by 0.1 to 0.8 LU. The renderer
+now fits a pre-gain and a limiter for such a source and keeps the linear step; a source that
+already normalises in linear mode keeps the exact filter graph it had, and a source that would
+need more limiting than LIMIT_MAX_DB keeps it too (G7 still fails on it).
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import tempfile
 import unittest
 from fractions import Fraction
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -94,7 +97,7 @@ class RenderCase(object):
 
 
 class TestClippedSourceReachesTarget(RenderCase, unittest.TestCase):
-    """Peaks at 0 dBFS, about -20.6 LUFS: the shape of the interview that failed G7."""
+    """Peaks at 0 dBFS, about -19 LUFS: the shape of the interview clip that failed G7."""
     clip_id = "hot"
 
     @staticmethod
@@ -169,6 +172,103 @@ class TestTooPeakyStillFails(RenderCase, unittest.TestCase):
     def test_g7_still_fails(self):
         g = qa.g7_loudness(self.out, "vertical")
         self.assertEqual(g["status"], "FAIL", g["evidence"])
+
+
+class TestNearTheCapReachesTarget(RenderCase, unittest.TestCase):
+    """A source whose fit needs about LIMIT_MAX_DB of limiting: the secant step from the first
+    two measurements overshoots the cap, and the fit must try the cap itself before it gives up
+    (it used to give up here, so loudnorm fell back to dynamic mode and G7 failed)."""
+    clip_id = "nearcap"
+
+    @staticmethod
+    def make_source(tmp):
+        return fixtures.make_peaky_speech_fixture(tmp, body_db=-15.0, seed=9)
+
+    def test_limiter_within_the_cap(self):
+        lim = self.log["loudnorm"].get("limiter")
+        self.assertIsInstance(lim, dict, self.log["loudnorm"])
+        self.assertLessEqual(lim["reduction_db"], render.LIMIT_MAX_DB)
+        self.assertTrue(render.loudnorm_linear(lim["measured"]))
+        self.assertIn("alimiter=", stage_b_graph(self.log))
+
+    def test_g7_passes(self):
+        g = qa.g7_loudness(self.out, "vertical")
+        self.assertEqual(g["status"], "PASS", g["evidence"])
+
+
+class TestPastTheCapStillFails(RenderCase, unittest.TestCase):
+    """A source that needs a little more than LIMIT_MAX_DB: even at the cap the limited audio
+    stays too quiet for the linear step, so it keeps the old graph and G7 still fails it."""
+    clip_id = "pastcap"
+
+    @staticmethod
+    def make_source(tmp):
+        return fixtures.make_peaky_speech_fixture(tmp, seed=5)
+
+    def test_old_graph_and_a_reason(self):
+        m = self.log["loudnorm"]
+        self.assertNotIn("limiter", m)
+        why = m.get("limiter_skipped") or ""
+        self.assertIn("limiting", why)
+        self.assertRegex(why, r"reaches -1[0-9]\.[0-9]+ LUFS")
+        self.assertIn("[ac]%s,aresample=48000,asetpts=N/SR/TB," % old_loudnorm(m), stage_b_graph(self.log))
+
+    def test_g7_still_fails(self):
+        g = qa.g7_loudness(self.out, "vertical")
+        self.assertEqual(g["status"], "FAIL", g["evidence"])
+
+
+class TestFitUsesTheWholeCap(unittest.TestCase):
+    """_fit_limiter on a replayed gain curve: loudnorm's measurement after the limiter, against
+    pre-gain, taken from ffmpeg on a synthetic track (make_peaky_speech_fixture, seed 11; peaks
+    -2.0 dBTP at every gain). It never asks the limiter for more than LIMIT_MAX_DB, and it calls
+    the peaks too much for it only after the gain at the cap has been measured and failed."""
+
+    FIRST = {"input_i": -19.81, "input_tp": 0.04, "input_lra": 1.8, "input_thresh": -29.9,
+             "target_offset": 0.0}
+    CURVE = ([5.81, 9.5, 10.0, 10.67, 11.0, 11.5, 12.0, 12.46, 12.95],
+             [-18.86, -16.48, -16.12, -15.61, -15.35, -14.98, -14.59, -14.23, -13.86])
+
+    def fit(self, first=None, shift=0.0):
+        gains = []
+
+        def fake_pass(ins, prefix, chain=""):
+            g = float(re.match(r"volume=(-?[0-9.]+)dB,", chain).group(1))
+            gains.append(g)
+            i = float(np.interp(g, self.CURVE[0], self.CURVE[1])) + shift
+            return {"input_i": round(i, 2), "input_tp": -2.0, "input_lra": 2.6,
+                    "input_thresh": round(i - 10.0, 2), "target_offset": 0.0}
+
+        with mock.patch.object(render, "_loudnorm_pass", fake_pass):
+            res = render._fit_limiter([], "", dict(first or self.FIRST))
+        return res, gains
+
+    def cap(self, first=None):
+        return render.LIMIT_MAX_DB + render.LIMIT_CEILING - (first or self.FIRST)["input_tp"]
+
+    def test_secant_past_the_cap_measures_the_cap(self):
+        res, gains = self.fit()
+        self.assertNotIn("skipped", res, res)
+        self.assertLessEqual(res["reduction_db"], render.LIMIT_MAX_DB)
+        self.assertLessEqual(max(gains), self.cap() + 1e-9, gains)
+        self.assertAlmostEqual(res["gain_db"], self.cap(), places=2)
+        self.assertTrue(render.loudnorm_linear(res["measured"]))
+
+    def test_skips_only_after_the_cap_fails(self):
+        res, gains = self.fit(shift=-0.85)   # at the cap: -14.71 LUFS, too quiet for linear
+        self.assertIn("skipped", res, res)
+        self.assertIn("limiting", res["skipped"])
+        self.assertIn("reaches -14.71 LUFS", res["skipped"])
+        self.assertLessEqual(max(gains), self.cap() + 1e-9, gains)
+        self.assertAlmostEqual(gains[-1], self.cap(), places=2)
+        self.assertEqual(sum(1 for g in gains if abs(g - self.cap()) < 0.005), 1, gains)
+
+    def test_first_gain_past_the_cap_measures_the_cap(self):
+        quiet = dict(self.FIRST, input_i=-30.0)   # 16 dB to the target, more than the cap allows
+        res, gains = self.fit(first=quiet, shift=quiet["input_i"] - self.FIRST["input_i"])
+        self.assertIn("limiting", res.get("skipped") or "", res)
+        self.assertEqual(len(gains), 1, gains)
+        self.assertAlmostEqual(gains[0], self.cap(quiet), places=2)
 
 
 class TestLimiterKeepsTiming(unittest.TestCase):

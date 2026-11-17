@@ -306,9 +306,9 @@ def make_peaky_speech_fixture(dir: Any, *, dur: float = 12.0, body_db: float = -
     """mp4 with a hot, clipped, speech-like track: syllables of a 110-170 Hz voice (8 harmonics)
     whose levels vary over ``span_db``, the loudest peaking at ``body_db`` dBFS, each opening on
     a 4 ms 2.5 kHz burst at full scale (a plosive), clipped at 0 dBFS, over a -60 dB pink floor.
-    With the defaults it measures about -20.6 LUFS with peaks at 0 dBTP, the shape of a hot
+    With the defaults it measures about -19 LUFS with peaks at 0 dBTP, the shape of a hot
     remote-interview track: lifting it to -14 LUFS in one linear step would put the peaks about
-    8 dB over loudnorm's -1.5 dBTP, so ffmpeg falls back to its dynamic mode."""
+    7 dB over loudnorm's -1.5 dBTP, so ffmpeg falls back to its dynamic mode."""
     import numpy as np
     d = Path(dir)
     d.mkdir(parents=True, exist_ok=True)
