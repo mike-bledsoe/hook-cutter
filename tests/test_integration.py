@@ -129,9 +129,9 @@ class TestPlanFixes(unittest.TestCase):
         self.assertTrue(any("only under the hook card" in m for m in msgs), msgs)
 
     def test_l08_matches_the_caption_hook_trim(self):
-        """Captions drop a word whose midpoint is before the card end (less the 60 ms lead), so
-        an accent starting 0.3 s before the card ends is never shown: L08 must say so. An accent
-        whose midpoint is after the card end is captioned and gets no under-card warning."""
+        """Captions drop a word whose onset is under the card, so an accent starting 0.3 s or
+        0.1 s before the card ends is never shown: L08 must say so. An accent starting after the
+        card end is captioned and gets no under-card warning."""
         def l08(start):
             words = [("so", 0.0, 0.3), ("we", 0.3, 0.6), ("reach", 0.6, 1.0),
                      ("out", 1.0, start), ("forty", start, start + 0.3),
@@ -143,7 +143,8 @@ class TestPlanFixes(unittest.TestCase):
             self.assertAlmostEqual(w["s_out"], start, delta=0.05)
             return [x["msg"] for x in plan["lints"] if x["id"] == "L08"]
         self.assertTrue(any("only under the hook card" in m for m in l08(2.2)))
-        self.assertFalse(any("only under the hook card" in m for m in l08(2.4)))
+        self.assertTrue(any("only under the hook card" in m for m in l08(2.4)))
+        self.assertFalse(any("only under the hook card" in m for m in l08(2.6)))
 
 
 class TestTranscriptFixes(unittest.TestCase):
