@@ -376,7 +376,8 @@ class SubtitleCuesAndCuts(unittest.TestCase):
                               (kind, 120, spoken("then we built it after that.", start=0.0, wps=4.0))])
             cues = TC.build(plan).srt_cues()
             texts = [c[2].replace("\n", " ") for c in cues]
-            self.assertEqual(texts, ["we sold it and", "then we built it after that."], kind)
+            # the clip's first word takes a capital; a piece that goes on with the sentence not
+            self.assertEqual(texts, ["We sold it and", "then we built it after that."], kind)
             cut = 100 / 30.0
             self.assertLessEqual(cues[0][1], cut + 1e-9, kind)
             self.assertGreaterEqual(cues[1][0], cut - 1e-9, kind)
@@ -385,7 +386,7 @@ class SubtitleCuesAndCuts(unittest.TestCase):
         plan = seam_plan([("start", 100, spoken("we sold it and", start=2.2, wps=4.0)),
                           ("tighten", 120, spoken("then we built it after that.", start=0.0, wps=4.0))])
         texts = [c[2].replace("\n", " ") for c in TC.build(plan).srt_cues()]
-        self.assertEqual(texts, ["we sold it and then we built it after that."])
+        self.assertEqual(texts, ["We sold it and then we built it after that."])
 
     def test_no_cue_ends_after_the_clip(self):
         # The last word ends 0.1 s before the end of the file: the 0.4 s cue tail used to run past it.
@@ -438,6 +439,10 @@ class SubtitleCuesAndCuts(unittest.TestCase):
             n_cues += len(cues)
             dur = plan["frames_out"] / 30.0
             said = [wd["text"] for wd in plan["words"]]
+            # the clip's first word, and a piece's first word after a sentence end, take a capital
+            said = [captions._cap_first(t) if k == 0 or (
+                plan["words"][k]["piece"] != plan["words"][k - 1]["piece"]
+                and captions._ends_sentence(said[k - 1])) else t for k, t in enumerate(said)]
             self.assertEqual(" ".join(c[2].replace("\n", " ") for c in cues).split(), said, seed)
             for k, (a, b, _) in enumerate(cues):
                 self.assertGreaterEqual(a, 0.0, seed)

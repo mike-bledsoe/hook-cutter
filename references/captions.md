@@ -29,6 +29,8 @@ enough to read and animate only what helps reading.
 - It is sourced from the hook card. Each `*accent*` run in `hook_card.lines` is matched in the
   captions as a phrase (case, apostrophes, hyphens and number forms normalised; stopwords
   ignored), so the hook card, the captions and the cover accent the same idea by construction.
+  A run that closes one line and a run that opens the next (`"THE *BANK*"`, `"*ACCOUNT*"`) are
+  one accent where the speaker says them together, so `per_page: 1` lights both words.
 - `emphasis` (word indices) adds a deliberate accent when the card does not cover it.
 - `auto` emphasis is opt-in per preset (`pop` opts in) and deliberately rare: only numbers,
   money and names that are capitalised mid-sentence, at least 4 s apart, never a word already
@@ -101,8 +103,10 @@ ignores `caption_y` (with an issue) and uses the preset's landscape `layout.y`.
   card is fully visible from the first frame and only fades out (`fade_out_ms`). The export
   manifest records `thumb_offset_ms: 0` for this reason.
 - Duration `"auto"` = 0.5 s plus characters divided by 20 (about adult reading speed), clamped to
-  1.5-3.0 s. Words spoken while the card is up are heard but never captioned; the first caption
-  page after the card starts on a fresh phrase, never on the tail of a sentence the card covered.
+  1.5-3.0 s. Words spoken while the card is up are heard but never captioned: a word whose onset
+  is under the card counts, even when most of it is heard after the card ends (no `fix` `""` is
+  needed to hide it). The first caption page after the card is paged afresh from the first word
+  spoken after it.
 - That makes card length a trade. A long card (a number over the auto duration) hides more of
   the opening line from muted viewers. Either keep the card short (its auto duration) and accept
   that the card stands in for the words under it, or do not put a line that needs captions
@@ -118,8 +122,9 @@ ignores `caption_y` (with an issue) and uses the preset's landscape `layout.y`.
   3) and `hc render` prints "hook card re-broken". If the card is still small, the render
   reports `hook_small` and `hc plan` warns (L20) with the line length that would fit. To keep
   your own breaks, write lines of about 10-12 characters.
-- An accent spoken only while the card is up never fires in the captions (captions start when
-  the card ends); `hc plan` warns (L08). Accent a word spoken after the card.
+- An accent that starts while the card is up never fires in the captions (captions start when
+  the card ends); `hc plan` warns (L08) when every time it is said starts under the card. Accent
+  a word spoken after the card.
 - Writing it: up to about nine words, lines of about 10-12 characters, one `*accent*` run, the
   speaker's own words where possible. Numbers and names must be said in the clip (QA G11). It is
   written to be heard (the voice plays underneath), so it can be terser than a cover
@@ -145,7 +150,9 @@ least `min_page` (0.8 s) and never ends a page or a line on a word that needs th
 friends") is kept whole. After paging:
 
 - a blank gap under 0.7 s between two pages is filled by holding the earlier page (no blink),
-  except across a seam;
+  except across a seam or a speaker change. A page that would end one or two frames before the
+  next page, or before the cut that closes its stretch (or the clip's end), holds to it, so no
+  frame right before a seam is left without a caption; it never holds past the cut;
 - a one-word hesitation page ("I", "And", "So") followed within a second joins the next page;
 - a page under `min_page` merges with a neighbour when it fits and the break between them is
   soft (never across a sentence end, a seam, a speaker change or a real pause);
@@ -169,7 +176,10 @@ characters per second for adults, a minimum event of about 5/6 s; speech runs 16
 minute). Short-form pages are much shorter by design: two to four words read in a glance.
 
 The `.srt` sidecar follows the broadcast limits instead of the burned paging: every visible word
-(including the ones spoken under the hook card), natural case, at most two lines of 42
+(including the ones spoken under the hook card), natural case (the clip's first word and the
+first word of a piece that follows a sentence end take a capital, so a piece cut in mid-sentence
+does not open its cue in lower case; a word that starts with a number, such as "3pm", is left as
+it is), at most two lines of 42
 characters and 7 s of speech per cue (a cue stays up to 0.4 s after its last word, so it can
 last 7.4 s), broken at sentence and clause ends. Cues also break at every join
 of kind piece, omit or dip (a cue never runs across a cut), and every cue lies inside the file:

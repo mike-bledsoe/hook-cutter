@@ -20,7 +20,8 @@ rule anywhere else, this file wins.
   camera when they say it, or the framing honestly shows the group (letterbox).
 - In a gallery or two-shot recording the largest face is often not the speaker. Set the
   `speakers` map (`editing.md` rule 19); QA G16 fails a render that frames someone else while a
-  person talks.
+  person talks. Without speaker labels, a piece the other person speaks names them with the
+  piece's `speaker`.
 - `speaker` in clips.json names whose claim it is; the export manifest carries it. The cover
   shows that person: cover auto-pick prefers their frames and QA G12 warns when the chosen frame
   belongs to someone else.

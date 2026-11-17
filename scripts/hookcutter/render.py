@@ -3,7 +3,8 @@
 Stage A: one lossless intermediate per plan segment (input-seeked, frame-exact video, sample-exact
 audio, framing applied), cached by content hash. Then a loudness measurement and a 5 fps luma
 track of the concatenated base. Stage B: concat filter over the segments + the caption strip on
-a pipe at the exact rational fps + dip overlays + linear loudnorm + TPDF dither, encoded once.
+a pipe at the exact rational fps + dip overlays + linear loudnorm (after a fitted pre-gain and
+limiter when the source is too peaky for one linear gain) + TPDF dither, encoded once.
 
 Sync rules that keep cuts from drifting: every segment's video is exactly `frames` frames and
 its audio exactly `samples` samples (verified with ffprobe); stage B regenerates timestamps from
@@ -33,6 +34,14 @@ DIP_ALPHA = 0.6
 DIP_HALF = 0.4
 FINAL_FADE_OUT = 0.06
 LOUDNORM = (-14.0, -1.5, 11.0)   # I, TP, LRA
+# A source too peaky to reach LOUDNORM's I in one linear gain (loudnorm would then switch itself
+# to dynamic mode, which lands short of the target) gets a pre-gain and a look-ahead limiter at
+# 192 kHz, so near true peak, before the linear loudnorm step.
+LIMIT_CEILING = -2.0     # dBFS the limiter holds
+LIMIT_PEAK = -1.75       # most a fitted chain may leave at 192 kHz after loudnorm's own gain
+LIMIT_MAX_DB = 15.0      # most gain reduction asked of the limiter on the loudest peak
+LIMIT_TRIES = 4          # measurement passes spent fitting the pre-gain
+LIMITER = "alimiter=limit=%.6f:attack=5:release=50:level=false:latency=true"
 CONTACT_FRAMES = 12
 CONTACT_COLS = 4
 CELL_W = {"vertical": 270, "landscape": 480}
@@ -530,7 +539,9 @@ def _clamp(v, lo, hi, default):
 
 
 def measure_loudness(paths: list, cache: Path) -> dict:
-    """loudnorm first pass over the concatenated audio (cached json)."""
+    """loudnorm first pass over the concatenated audio (cached json), plus the pre-gain and
+    limiter fitted when the audio is too peaky for one linear gain (`limiter`), or the reason
+    none was (`limiter_skipped`); see _fit_limiter."""
     if cache.exists():
         try:
             return env.read_json(cache)
@@ -541,21 +552,107 @@ def measure_loudness(paths: list, cache: Path) -> dict:
         ins += ["-i", str(p)]
     n = len(paths)
     prefix = "%sconcat=n=%d:v=0:a=1[hc_cat]" % ("".join("[%d:a]" % i for i in range(n)), n)
+    meas = _loudnorm_pass(ins, prefix)
+    fit = _fit_limiter(ins, prefix, meas)
+    if fit is not None and "skipped" in fit:
+        meas["limiter_skipped"] = fit["skipped"]
+        env.log("render", "loudness: %s; loudnorm falls back to its dynamic mode, which can land "
+                "short of %g LUFS (QA G7)" % (fit["skipped"], LOUDNORM[0]))
+    elif fit is not None:
+        meas["limiter"] = fit
+        env.log("render", "loudness: the audio peaks at %.1f dBTP, too hot for one linear gain to %g "
+                "LUFS: pre-gain %+.2f dB and a limiter that takes up to %.1f dB off the loudest peaks"
+                % (_clamp(meas.get("input_tp"), -99, 99, -70.0), LOUDNORM[0], fit["gain_db"],
+                   fit["reduction_db"]))
+    env.write_json(cache, meas)
+    return meas
+
+
+def _loudnorm_pass(ins: list, prefix: str, chain: str = "") -> dict:
+    """One loudnorm first pass over the concatenated audio (`prefix` ends in [hc_cat]), measured
+    after `chain` when one is given."""
+    if chain:
+        prefix = "%s;[hc_cat]%s[hc_lim]" % (prefix, chain)
     try:
         from . import audio as audio_mod
         fn = getattr(audio_mod, "loudnorm_measure", None)
     except ImportError:
         fn = None
     if fn is not None:
-        meas = fn(ins, prefix)
-    else:
-        i, tp, lra = LOUDNORM
-        res = env.ff(["-loglevel", "info", "-nostats"] + ins +
-                     ["-filter_complex", "%s;[hc_cat]loudnorm=I=%s:TP=%s:LRA=%s:print_format=json[hc_ln]"
-                      % (prefix, i, tp, lra), "-map", "[hc_ln]", "-f", "null", "-"])
-        meas = _parse_loudnorm(res.stderr)
-    env.write_json(cache, meas)
-    return meas
+        return fn(ins, prefix)
+    i, tp, lra = LOUDNORM
+    res = env.ff(["-loglevel", "info", "-nostats"] + ins +
+                 ["-filter_complex", "%s;%sloudnorm=I=%s:TP=%s:LRA=%s:print_format=json[hc_ln]"
+                  % (prefix, "[hc_lim]" if chain else "[hc_cat]", i, tp, lra),
+                  "-map", "[hc_ln]", "-f", "null", "-"])
+    return _parse_loudnorm(res.stderr)
+
+
+def _ln_args(meas: dict) -> tuple:
+    """(I, TP, LRA) as loudnorm reads them back from the filter string (clamped, two decimals)."""
+    return (float("%.2f" % _clamp(meas.get("input_i"), -99, 0, -70.0)),
+            float("%.2f" % _clamp(meas.get("input_tp"), -99, 99, -70.0)),
+            float("%.2f" % _clamp(meas.get("input_lra"), 0, 99, 0.0)))
+
+
+def loudnorm_linear(meas: dict) -> bool:
+    """True when loudnorm, given these first-pass measurements, really runs in linear mode.
+    ffmpeg's own test: the one gain to the target must not lift the true peak over TP, and the
+    measured range must fit LRA; otherwise it switches to dynamic mode without an error."""
+    i, tp, lra = LOUDNORM
+    mi, mtp, mlra = _ln_args(meas)
+    return mtp + (i - mi) <= tp and mlra <= lra
+
+
+def _limiter_chain(gain_db: float) -> str:
+    return "volume=%.2fdB,aresample=192000,%s" % (float(gain_db), LIMITER % 10 ** (LIMIT_CEILING / 20.0))
+
+
+def _fit_limiter(ins: list, prefix: str, meas: dict):
+    """None when the peaks leave room for one linear gain to the target. Otherwise the pre-gain
+    that, through the limiter, brings the audio to the target with loudnorm still linear:
+    {"gain_db", "ceiling_db", "reduction_db", "passes", "measured" (loudnorm's measurement
+    after the limiter)}, or {"skipped": why} when no fit within LIMIT_MAX_DB is found. Limiting
+    takes some loudness off with the peaks, so the gain is refined from fresh measurements (a
+    secant step on gain vs loudness), at most LIMIT_TRIES passes. A step past the gain that asks
+    LIMIT_MAX_DB of the limiter is clamped to that gain, and the peaks are called too much for
+    the limiter only once that gain has been measured and failed."""
+    i_t, tp_t, lra_t = LOUDNORM
+    mi, mtp, mlra = _ln_args(meas)
+    if mtp + (i_t - mi) <= tp_t:
+        return None
+    if mlra > lra_t:
+        return {"skipped": "the loudness range %.1f LU is wider than %g LU, so a limiter cannot "
+                           "make the linear step possible" % (mlra, lra_t)}
+    cap = float("%.2f" % (LIMIT_MAX_DB + LIMIT_CEILING - mtp))
+    gain = min(float("%.2f" % (i_t - mi)), cap)
+    tried = []
+    for _ in range(LIMIT_TRIES):
+        m2 = _loudnorm_pass(ins, prefix, _limiter_chain(gain))
+        i2, tp2, lra2 = _ln_args(m2)
+        if loudnorm_linear(m2) and tp2 + (i_t - i2) <= LIMIT_PEAK:
+            return {"gain_db": gain, "ceiling_db": LIMIT_CEILING,
+                    "reduction_db": round(mtp + gain - LIMIT_CEILING, 2),
+                    "passes": len(tried) + 1, "measured": m2}
+        if lra2 > lra_t:
+            return {"skipped": "after limiting, the loudness range %.1f LU is still wider than %g LU"
+                               % (lra2, lra_t)}
+        if gain >= cap:
+            return {"skipped": "the peaks would need more than %g dB of limiting: with %g dB the "
+                               "limited audio reaches %.2f LUFS at a %.2f dBTP peak, and one linear "
+                               "step to %g LUFS needs %.2f LUFS or more"
+                               % (LIMIT_MAX_DB, LIMIT_MAX_DB, i2, tp2, i_t, i_t + tp2 - LIMIT_PEAK)}
+        tried.append((gain, i2))
+        slope = 1.0
+        if len(tried) > 1 and tried[-1][0] != tried[-2][0]:
+            slope = (tried[-1][1] - tried[-2][1]) / (tried[-1][0] - tried[-2][0])
+        nxt = float("%.2f" % (gain + (i_t - i2) / min(1.0, max(0.25, slope))))
+        if nxt <= gain:
+            return {"skipped": "the limiter's output peaks at %.1f dBTP, over its %g dBFS ceiling"
+                               % (tp2, LIMIT_CEILING)}
+        gain = min(nxt, cap)
+    return {"skipped": "no pre-gain within %d passes brought the limited audio to %g LUFS"
+                       % (LIMIT_TRIES, i_t)}
 
 
 def _parse_loudnorm(text: str) -> dict:
@@ -572,6 +669,16 @@ def _parse_loudnorm(text: str) -> dict:
 
 
 def loudnorm_filter(meas: dict) -> str:
+    """Stage B normalisation: linear loudnorm on the first-pass measurements or, when a limiter
+    was fitted (`meas["limiter"]`), the pre-gain and limiter, then linear loudnorm on the
+    measurements taken after them."""
+    lim = meas.get("limiter")
+    if isinstance(lim, dict) and isinstance(lim.get("measured"), dict):
+        return "%s,%s" % (_limiter_chain(lim["gain_db"]), _linear_loudnorm(lim["measured"]))
+    return _linear_loudnorm(meas)
+
+
+def _linear_loudnorm(meas: dict) -> str:
     i, tp, lra = LOUDNORM
     return ("loudnorm=I=%s:TP=%s:LRA=%s:measured_I=%.2f:measured_TP=%.2f:measured_LRA=%.2f:"
             "measured_thresh=%.2f:offset=%.2f:linear=true"

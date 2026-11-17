@@ -39,7 +39,8 @@ examples, 13 how hunters fail.
   (`false_start`: two attempts at a phrase stored as one run) and a word whose start sits under
   a laugh or another voice (`timing_uncertain`). Inspect a hole with `hc words` on both sides and
   `hc peek` before you log or keep a moment that spans it: a laugh is fine, missing speech is
-  not (plan lints L15 and L19 flag holes inside a clip).
+  not (plan lints L15 and L19 flag holes inside a clip; L21 shorter ones, and words that may
+  hold more than their text, also just outside its edges).
 - Text the backend writes in parentheses (up to 4 words) or brackets (up to 8) is set aside as a
   sound event and never captioned. Transcribe prints `set aside N sound events ...: (laughs) x2,
   [Music]` and lists them in transcript.json `events` with kind `sound`: read that line, a

@@ -67,8 +67,6 @@ FADE_LAST = 0.06
 # lints (8.1.3)
 SENTENCE_PAUSE = 0.3
 PAYOFF_BY = {"vertical": 8.0, "landscape": 20.0}
-HOOK_ACCENT_LEAD = 0.06  # caption.lead_ms of the shipped presets: a word whose midpoint is earlier
-                         # than the card end less this is not in the burned captions
 CUT_RATE_MAX = 0.5
 UPSCALE_MAX = 3.0
 OVERLAP_MAX = 15.0
@@ -89,6 +87,14 @@ DEAD_AIR_START = 0.25    # L18: ... at the clip start
 DEAD_AIR_LOOK = 1.0      # L18: onset search window
 HOLE_WARN = 1.5          # L19: uncovered voiced audio this long WARNs ...
 HOLE_FAIL = 3.0          # ... and this long FAILs (unless a transcript flag covers it)
+HIDDEN_EDGE = 0.5        # L21: words and sound this far outside a kept segment are checked too
+HIDDEN_BASE = 0.30       # L21 (a): a word may sound for base + per letter of its text ...
+HIDDEN_PER_LETTER = 0.06  # ... (a digit counts as 3 letters: "190" is said "one ninety") ...
+HIDDEN_INTO = 0.05       # ... and is suspect only when the next word starts this close after it
+HIDDEN_GAP = 0.20        # L21 (b): a gap between two words this long ...
+HIDDEN_GAP_SHARE = 0.8   # ... with this share of its frames at speech level (align.speech_share)
+HIDDEN_RUN = 0.30        # L21 (c): wordless sound this long (and shorter than HOLE_WARN) ...
+HIDDEN_RUN_DB = 18.0     # ... whose median lies within this of the local speech level
 HOOK_RATIO_MIN = 1.3     # L20: the hook card should set at least this much larger than captions
 HOOK_AUTO = (0.5, 20.0, 1.5, 3.0)    # dur = clamp(a + chars / b, lo, hi)
 EPS = 1e-6
@@ -664,7 +670,7 @@ def plan_clip(spec: dict, clip_id: str, transcript: dict, source: dict, energy,
                    "sar": video.get("sar"), "active_area": video.get("active_area")},
         "eff": clip.get("_eff"),
         "speakers": _speakers(spec),
-        "pieces": _piece_records(recs, segs, G, W, ctx.omit),
+        "pieces": _piece_records(recs, segs, G, W, ctx.omit, ctx),
         "segments": segs, "removals": removals, "joins": joins, "words": words,
         "intent": intent, "inserts": inserts,
         "duration_out": round(dur, 6), "frames_out": frames_out,
@@ -1063,6 +1069,18 @@ def _seg_lookup(segs_p: list, t: float, starts: list | None = None):
     return None
 
 
+def _spec_label(ctx: _Ctx, r: dict):
+    """(label, where from) for the piece's words the transcript left unlabelled: the piece's
+    "speaker", else the clip's "speaker" once any piece of the clip names one (a transcript
+    without labels then reads as the pieces say), else (None, None). Transcript labels win."""
+    lab = (r.get("p") or {}).get("speaker")
+    if lab:
+        return lab, "piece"
+    if ctx.clip.get("speaker") and any(p.get("speaker") for p in ctx.clip.get("pieces") or []):
+        return ctx.clip["speaker"], "clip"
+    return None, None
+
+
 def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
     W, N = ctx.W, ctx.N
     by_piece: dict = {}
@@ -1085,6 +1103,7 @@ def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
         lo = bisect.bisect_left(ctx._starts, ps0 - 30.0)
         hi = bisect.bisect_left(ctx._starts, ps1)
         cands = set(range(lo, hi)) | r["idxset"]
+        fill, fill_from = _spec_label(ctx, r)
         for i in sorted(cands, key=lambda j: (W[j]["s"], j)):
             w = W[i]
             in_piece = i in r["idxset"]
@@ -1099,6 +1118,8 @@ def _plan_words(ctx: _Ctx, recs: list, segs: list) -> list:
                    "omitted": omitted, "removed": False}
             if not in_piece:
                 rec["edge"] = True
+            elif fill and not rec["sp"]:
+                rec["sp"], rec["sp_from"] = fill, fill_from
             mid = (w["s"] + max(w["e"], w["s"])) / 2
             seg_s, seg_m = _seg_lookup(segs_p, w["s"], starts), _seg_lookup(segs_p, mid, starts)
             nk = bisect.bisect_left(starts, w["s"] - EPS)
@@ -1147,10 +1168,11 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
     the inserted tokens placed in time order inside their piece, plan["inserts"]).
 
     An inserted token is a plan word with `i` None and `ins` = the insert's number: it is
-    heard, captioned and timed like any word, has no transcript index and no speaker label, and
-    is never addressed by fix / emphasis / omit / verbatim. The whole `src` span must lie in one
-    kept segment of the piece that holds `after` (tighten protects it; an omit or a piece edge
-    that cuts through it is an L01 FAIL)."""
+    heard, captioned and timed like any word, has no transcript index and no speaker label but
+    the one clips.json gives its piece (_spec_label; the transcript label of the `after` word
+    wins there, as on any word), and is never addressed by fix / emphasis / omit / verbatim.
+    The whole `src` span must lie in one kept segment of the piece that holds `after` (tighten
+    protects it; an omit or a piece edge that cuts through it is an L01 FAIL)."""
     if not ctx.inserts:
         return words, []
     by_piece: dict = {}
@@ -1185,6 +1207,9 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
             continue
         r, sg = hit
         toks = insert_tokens(ins["text"], s, e)
+        fill, fill_from = _spec_label(ctx, r)
+        if fill and 0 <= after < ctx.N and ctx.W[after].get("sp"):
+            fill, fill_from = ctx.W[after]["sp"], "after"   # the transcript labels its turn
         for tok, a, b in toks:
             a_c, b_c = max(a, sg["src"][0]), min(b, sg["src"][1])
             extra.setdefault(r["n"], []).append({
@@ -1192,8 +1217,9 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
                 "s_src": round(a, 4), "e_src": round(b, 4),
                 "s_out": round(sg["out"][0] + (a_c - sg["src"][0]), 4),
                 "e_out": round(sg["out"][0] + (max(b_c, a_c) - sg["src"][0]), 4),
-                "piece": r["n"], "seg": sg["k"], "sp": None, "filler": False, "hidden": False,
-                "omitted": False, "removed": False, "_after": after})
+                "piece": r["n"], "seg": sg["k"], "sp": fill, "filler": False, "hidden": False,
+                "omitted": False, "removed": False, "_after": after, "_s0": round(s, 4),
+                **({"sp_from": fill_from} if fill else {})})
         meta.append({"n": n, "after": after, "tokens": [t for t, _a, _b in toks],
                      "src": [round(s, 4), round(e, 4)], "piece": r["n"]})
     if not extra:
@@ -1205,27 +1231,47 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
         while k < len(words) and words[k]["piece"] == pn:
             block.append(words[k])
             k += 1
+        runs: dict = {}
         for tok in extra.pop(pn, []):
-            # time order, and never before the word it follows
+            # time order, and never before the word it follows. A transcript word that starts
+            # with the insert comes after all of it ("after" says where it goes: the transcript
+            # folded the inserted speech into that word's start); an inserted word placed earlier
+            # stays first.
             pos = 0
             for j, w in enumerate(block):
-                if w.get("i") == tok["_after"] or w["s_src"] <= tok["s_src"]:
+                if (w.get("i") == tok["_after"]
+                        or (w["s_src"] < tok["s_src"] - 1e-6 and abs(w["s_src"] - tok["_s0"]) > 1e-6)
+                        or (w.get("i") is None and w["s_src"] <= tok["s_src"])):
                     pos = j + 1
-            tok = {key: v for key, v in tok.items() if key != "_after"}
+            run = runs.setdefault(tok["ins"], {"after": tok["_after"], "s0": tok["_s0"],
+                                               "seg": tok["seg"], "end": tok["e_out"]})
+            run["end"] = max(run["end"], tok["e_out"])
+            tok = {key: v for key, v in tok.items() if key not in ("_after", "_s0")}
             block.insert(pos, tok)
+        # That folded word is heard once the insert ends, so its caption starts there (the
+        # captions play words in time order: at its transcript start it would light first).
+        for run in runs.values():
+            for w in block:
+                if (w.get("i") is not None and w["i"] != run["after"] and not w.get("edge")
+                        and w.get("s_out") is not None and w.get("seg") == run["seg"]
+                        and abs(w["s_src"] - run["s0"]) <= 1e-6):
+                    w["s_out"] = max(w["s_out"], run["end"])
+                    w["e_out"] = max(w["e_out"], w["s_out"])
         out.extend(block)
     return out, meta
 
 
-def _piece_records(recs: list, segs: list, G: Grid, W: list = (), omit=frozenset()) -> list:
+def _piece_records(recs: list, segs: list, G: Grid, W: list = (), omit=frozenset(),
+                   ctx: _Ctx | None = None) -> list:
     out = []
     for r in recs:
         mine = [s for s in segs if s["piece"] == r["n"]]
         p = r["p"]
         first, last = r["runs"][0], r["runs"][-1]
         labels = []
+        fill = _spec_label(ctx, r)[0] if ctx is not None else None
         for i in r["idxs"]:
-            sp = W[i].get("sp") if 0 <= i < len(W) else None
+            sp = (W[i].get("sp") or fill) if 0 <= i < len(W) else None
             if sp and sp not in labels and not (r["type"] == "words" and i in omit):
                 labels.append(sp)
         out.append({
@@ -1489,13 +1535,13 @@ def _lints(ctx, spec, cid, transcript, source, plan, recs, shots) -> list:
                 if t > lim:
                     L("L08", "WARN", f"{fmt}: hook accent {phrase!r} is first spoken at {t:.1f} s "
                       f"(payoff should land by {lim:g} s)", t)
-        # The burned captions skip every word whose midpoint falls before the card ends (less the
-        # caption lead), so an accent spoken only under the card is never highlighted in the
-        # captions (the captions.json issue accent_unshown and QA G14 report it after the render).
+        # The burned captions skip every word whose onset is under the card, so an accent that
+        # starts under the card every time it is said is never highlighted in the captions (the
+        # captions.json issue accent_unshown and QA G14 report it after the render).
         hdur = float(hc.get("dur") or 0.0)
-        for phrase, hits in _spoken_times(cap, accent_phrases(hc["lines"]), mid=True):
+        for phrase, hits in _spoken_times(cap, accent_phrases(hc["lines"])):
             hits = [h for h in hits if h is not None]
-            if hits and hdur > 0 and max(hits) < hdur - HOOK_ACCENT_LEAD:
+            if hits and hdur > 0 and max(hits) < hdur - 1e-6:
                 L("L08", "WARN", f"hook accent {phrase!r} is spoken only under the hook card "
                   f"(at {max(hits):.1f} s; the card holds until {hdur:.1f} s), so the captions "
                   "never highlight it: accent a word spoken later, or shorten hook_card.dur", hits[0])
@@ -1578,10 +1624,12 @@ def _lints(ctx, spec, cid, transcript, source, plan, recs, shots) -> list:
         L("L17", lvl, f"pieces[{i}] and pieces[{j}] share {' / '.join(what)}: the audience "
           "hears it twice", _seg_out_start(plan, j))
 
-    # L18 dead air at a segment start, L19 speech with no transcript words
+    # L18 dead air at a segment start, L19 speech with no transcript words, L21 speech the
+    # transcript may have folded into a word or dropped
     if E is not None:
         _lint_dead_air(ctx, plan, recs, L)
         _lint_holes(ctx, plan, recs, transcript, L)
+        _lint_hidden(ctx, plan, transcript, L)
     return out
 
 
@@ -1789,6 +1837,131 @@ def _lint_holes(ctx, plan, recs, transcript, L) -> None:
               "re-run hc transcribe (it re-listens to gaps) or keep it out of the clip", at)
 
 
+def _spoken_letters(raw: str) -> int:
+    """Letters it takes to say a word: a digit counts as 3 ("190" is "one ninety")."""
+    return max(1, sum(1 for ch in raw if ch.isalpha()) + 3 * sum(1 for ch in raw if ch.isdigit()))
+
+
+def _lint_hidden(ctx, plan, transcript, L) -> None:
+    """L21: speech the transcript may have folded into a neighbouring word or dropped, inside
+    the clip and up to HIDDEN_EDGE outside every kept segment (where a cut decides what is
+    heard). (a) A word whose voiced length is far beyond what its text takes to say and that
+    runs straight into the next word: a restart or a filler stamped as one token ("I'm in a,
+    I'm in a" as one 'a'); a drawn word before a pause is ordinary speech. (b) A gap between
+    two words of HIDDEN_GAP or more that sounds at speech level across most of it: a filler or
+    a word with no token, or a mis-timed edge. (c) Wordless sound at speech level from
+    HIDDEN_RUN up to L19's HOLE_WARN. Speech level is relative to the speech around it, so a
+    breath on a quiet recording is not counted. The energy track cannot say what was said; a
+    slice transcription can. The editor's answer settles it: an `insert` over the stretch, or a
+    `fix` on the word (for a gap or wordless sound: on the word after it, which then carries
+    what was heard). An `in_offset` that steps over a restart inside the word does not settle
+    (a): what is left after the edge can still hold more than the text ("I did a, I built"
+    stamped 'built', the edge past "I did a," leaves "I built"), so the `fix` says what is
+    heard from the edge on. (a) also reads words a `false_start` or `timing_uncertain` flag
+    marks (the flag can name one restart while the word holds more); sound that L15 (an
+    `unworded_audio` or `dropout` flag) or L19 already reports is not repeated."""
+    from . import align
+    E, W, N = ctx.E, ctx.W, ctx.N
+    segs = _union([tuple(s["src"]) for s in plan["segments"]])
+    if not segs or not N:
+        return
+    near = _Prot([(a - HIDDEN_EDGE, b + HIDDEN_EDGE) for a, b in segs])
+    win = near.m
+    typed = _insert_spans(plan)
+    kept = set(plan["intent"])
+    told = [(float(f["s"]), float(f["e"])) for f in transcript.get("flags") or []
+            if f.get("kind") in TIME_FLAGS and isinstance(f.get("s"), (int, float))
+            and isinstance(f.get("e"), (int, float))
+            and _overlap([(float(f["s"]), float(f["e"]))], segs) > 0]
+    lo = bisect.bisect_left(ctx._starts, win[0][0] - 30.0)
+    hi = min(N, bisect.bisect_left(ctx._starts, win[-1][1]) + 1)
+    fmt = specmod.fmt_time
+    found = []                         # (src a, src b, message)
+    claimed = []                       # sound L19 or L15 names: (b) skips it, as it skips (c)'s
+
+    def around(k0, k1, t0=math.inf, t1=-math.inf):
+        a, b = min(float(W[k0]["s"]), t0), max(float(W[k1]["e"]), t1)
+        return (f"transcribe src {fmt(a)}-{fmt(b)} on its own ({_listen_cmd(a, b, E)}, which writes "
+                "nothing into P) before trusting the words")
+
+    # (c) wordless sound at speech level, below L19's length
+    spans = W[lo:hi] + [{"s": x, "e": y} for x, y in typed]
+    spans.sort(key=lambda w: (w["s"], w["e"]))
+    for a, b in win:
+        for hs, he in align.uncovered_voiced(E, spans, a, b, min_run=HIDDEN_RUN):
+            if _overlap([(hs, he)], segs) >= HOLE_WARN - EPS or _overlap([(hs, he)], told) > 0:
+                claimed.append((hs, he))
+                continue
+            k = bisect.bisect_left(ctx._starts, hs)
+            if str(k) in ctx.fix or align.speech_share(E, hs, he, HIDDEN_RUN_DB) < 0.5:
+                continue
+            pw = f" after {W[k - 1]['w']!r}" if k > 0 else ""
+            nw = f" before {W[k]['w']!r}" if k < N else ""
+            why = (f"L19 starts at {HOLE_WARN:g} s" if he - hs < HOLE_WARN - EPS else
+                   f"{_overlap([(hs, he)], segs):.2f} s of it inside the clip, under L19's "
+                   f"{HOLE_WARN:g} s")
+            found.append((hs, he, f"{he - hs:.1f} s of sound at speech level with no words "
+                          f"at src {fmt(hs)}{pw}{nw} ({why}): speech the transcript dropped, or "
+                          "a word stamped somewhere else; "
+                          + around(max(k - 1, 0), min(k, N - 1), hs, he)))
+    # (b) a gap between two words that sounds at speech level
+    for i in range(max(lo, 1), hi):
+        a, b = float(W[i - 1]["e"]), float(W[i]["s"])
+        if b - a < HIDDEN_GAP - EPS or near.clear(a, b) or _overlap([(a, b)], typed) > 0 \
+                or str(i) in ctx.fix \
+                or any(x < b and y > a for x, y, *_m in claimed + found):
+            continue
+        if align.speech_share(E, a, b) >= HIDDEN_GAP_SHARE:
+            found.append((a, b, f"the {b - a:.2f} s between {W[i - 1]['w']!r} and "
+                          f"{W[i]['w']!r} at src {fmt(a)} sounds like speech but holds no word: a "
+                          "filler or word the transcript dropped, or a mis-timed edge; "
+                          + around(i - 1, i)))
+    # (a) a word far longer than its text, running straight into the next word
+    for i in range(lo, min(hi, N - 1)):
+        w, nw = W[i], W[i + 1]
+        s, e = float(w["s"]), float(w["e"])
+        if near.clear(s, e) or str(i) in ctx.fix or ctx.filler(i):
+            continue
+        te = ctx.te(i)
+        if _overlap([(s, te)], typed) > 0:
+            continue
+        lim = HIDDEN_BASE + HIDDEN_PER_LETTER * _spoken_letters(w["w"])
+        if te - s <= lim or float(nw["s"]) - te > HIDDEN_INTO:
+            continue
+        v = _voiced_s(E, s, te, E.floor(s))
+        if v > lim:
+            cap = " (its caption would show one word for several)" if i in kept else ""
+            found.append((s, te, f"word {i} {w['w']!r} at src {fmt(s)} sounds for "
+                          f"{te - s:.2f} s, long for its text, and runs straight into "
+                          f"{nw['w']!r}: a restart or a filler may be folded into it{cap}; "
+                          + around(max(i - 1, 0), i + 1)))
+    for a, _b, msg in sorted(found, key=lambda f: f[0]):
+        L("L21", "WARN", msg, _out_near(plan, a))
+
+
+def _listen_cmd(s: float, e: float, E=None) -> str:
+    """The `hc listen` command for source stretch [s, e] with LISTEN_MARGIN each side (L15, L21);
+    a stretch past LISTEN_MAX is named as slices of at most that length. Given the energy track
+    E, an edge the margin puts inside voiced audio moves out to the quiet edge hc listen itself
+    would suggest (listen.edge_report), so the slice starts and ends in a pause: one cut inside
+    the neighbouring words drops or invents the very words the lint asks about."""
+    from .listen import LISTEN_MARGIN, LISTEN_MAX, edge_report
+    lo, hi = max(0.0, s - LISTEN_MARGIN), e + LISTEN_MARGIN
+    if E is not None:
+        top = E.end
+        hi = min(hi, top)
+        q = edge_report(E, lo, "start", 0.0, top)
+        if q["voiced"] and q["quiet"] is not None:
+            lo = min(lo, q["quiet"])
+        q = edge_report(E, hi, "end", 0.0, top)
+        if q["voiced"] and q["quiet"] is not None:
+            hi = max(hi, q["quiet"])
+    if hi - lo > LISTEN_MAX:
+        return (f"hc listen P {lo:.2f} {lo + LISTEN_MAX:.2f} and on to {hi:.2f}, in slices of "
+                f"at most {LISTEN_MAX:.0f} s that meet in a pause")
+    return f"hc listen P {lo:.2f} {hi:.2f}"
+
+
 def _flag_msg(f: dict, a, b, t_src=None) -> str:
     kind = f.get("kind", "flag")
     if kind == "false_start":
@@ -1808,11 +1981,11 @@ def _flag_msg(f: dict, a, b, t_src=None) -> str:
         return (f"low-confidence transcript word{w}{p} at words {a}-{b}: check it and add a "
                 "\"fix\" if it is wrong")
     if kind == "unworded_audio":
-        d = float(f.get("e", 0.0)) - float(f.get("s", 0.0))
-        return (f"{d:.1f} s of sound with no words at src {specmod.fmt_time(f.get('s', 0.0))} is "
-                "inside the clip (laughter, music or speech ASR missed): transcribe that stretch on "
-                "its own before keeping it (hc transcribe P --file SNIPPET --clip SCRATCH-ID) and "
-                "caption speech the transcript missed with \"insert\"")
+        fs, fe = float(f.get("s", 0.0)), float(f.get("e", 0.0))
+        return (f"{fe - fs:.1f} s of sound with no words at src {specmod.fmt_time(fs)} is "
+                "inside the clip (laughter, music or speech ASR missed): transcribe that stretch "
+                f"on its own before keeping it ({_listen_cmd(fs, fe)}, which writes nothing into "
+                "P) and caption speech the transcript missed with \"insert\"")
     if kind == "dropout":
         n = f.get("vtt_words")
         n = len(n) if isinstance(n, (list, tuple)) else n
@@ -1826,13 +1999,19 @@ def _flag_msg(f: dict, a, b, t_src=None) -> str:
 
 
 def _out_near(plan, t_src):
+    """Output time of t_src; for a time no segment plays, the out time of the segment edge
+    nearest it in the source (a start after it or an end before it), so a lint about a stretch
+    just outside a piece points at that piece even when a later passage plays first."""
     v = out_time(plan, t_src)
     if v is not None:
         return v
+    best = None
     for s in plan["segments"]:
-        if s["src"][0] >= t_src:
-            return s["out"][0]
-    return plan["duration_out"]
+        a, b = s["src"]
+        for d, at in ((a - t_src, s["out"][0]), (t_src - b, s["out"][1])):
+            if d >= 0 and (best is None or d < best[0]):
+                best = (d, at)
+    return best[1] if best is not None else plan["duration_out"]
 
 
 def _seg_out_start(plan, piece_n):
@@ -1842,9 +2021,8 @@ def _seg_out_start(plan, piece_n):
     return None
 
 
-def _spoken_times(cap: list, phrases: list, mid: bool = False) -> list:
-    """[(phrase, [s_out of every occurrence])] matching content tokens consecutively (`mid`: the
-    first matched word's midpoint instead of its s_out)."""
+def _spoken_times(cap: list, phrases: list) -> list:
+    """[(phrase, [s_out of every occurrence])] matching content tokens consecutively."""
     raws = [w["text"] or w["raw"] for w in cap]
     stream = [(t, k) for t, k, _ in tn.norm_stream(raws)
               if t not in tn.STOPWORDS and not tn.is_filler(t)]
@@ -1856,9 +2034,7 @@ def _spoken_times(cap: list, phrases: list, mid: bool = False) -> list:
         if P:
             for j in range(0, len(toks) - len(P) + 1):
                 if toks[j:j + len(P)] == P:
-                    w = cap[stream[j][1]]
-                    hits.append((w["s_out"] + w["e_out"]) / 2.0
-                                if mid and w.get("e_out") is not None else w["s_out"])
+                    hits.append(cap[stream[j][1]]["s_out"])
         out.append((ph, hits))
     return out
 
@@ -2229,8 +2405,10 @@ def transcript_changed(plan: dict, transcript: dict | None) -> bool:
     or another speaker label on a word the plan uses. The sha does not cover labels (it pins
     word indices and must not move when a label is corrected), so the labels are compared with
     the ones the plan itself recorded: every label a plan uses (words[].sp, pieces[].speakers,
-    the speaker turns framing follows) comes from those words. Inserted words (i None) have no
-    transcript word. For a caption_only plan pass the clip's own transcript."""
+    the speaker turns framing follows) comes from those words. A label clips.json gave a word
+    the transcript left unlabelled (`sp_from`, see _spec_label) stands for no transcript label.
+    Inserted words (i None) have no transcript word. For a caption_only plan pass the clip's
+    own transcript."""
     tr = transcript or {}
     if (plan or {}).get("transcript_sha") != tr.get("sha256"):
         return True
@@ -2238,7 +2416,8 @@ def transcript_changed(plan: dict, transcript: dict | None) -> bool:
     for w in (plan or {}).get("words") or []:
         i = w.get("i")
         if isinstance(i, int) and not isinstance(i, bool):
-            if not 0 <= i < len(words) or w.get("sp") != words[i].get("sp"):
+            own = None if w.get("sp_from") else w.get("sp")
+            if not 0 <= i < len(words) or own != words[i].get("sp"):
                 return True
     return False
 

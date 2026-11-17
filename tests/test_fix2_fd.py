@@ -630,7 +630,7 @@ class StaleCovers(StatusProject):
 
     def test_at_out_is_compared_on_its_frame(self):
         P = self.project("cov-frame")
-        self.set_clip(P, at_out=0.23)                 # the same 25 fps frame as 0.2
+        self.set_clip(P, at_out=0.21)                 # its nearest 25 fps frame is 0.2
         self.assertEqual(self.cover_part(self.line(P)), "1/1")
 
     def test_forced_frame_with_auto_in_the_spec_is_stale(self):
@@ -828,7 +828,7 @@ class DocsSayWhatTheToolDoes(unittest.TestCase):
                  "do not put a line that needs captions under the card")
 
     def test_unworded_sound_can_be_checked_without_ears(self):
-        self.has("references/qa.md", "You cannot listen", "hc transcribe P --file cache/scratch-a.wav --clip scratch-a",
+        self.has("references/qa.md", "You cannot listen", "hc listen P 132.2 134.0",
                  "Caption it with the clip key `insert`")
 
     def test_piece_split_for_a_protected_pause(self):
