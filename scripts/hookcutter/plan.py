@@ -1170,8 +1170,9 @@ def _insert_words(ctx: _Ctx, recs: list, segs: list, words: list, lints: list, c
     An inserted token is a plan word with `i` None and `ins` = the insert's number: it is
     heard, captioned and timed like any word, has no transcript index and no speaker label but
     the one clips.json gives its piece (_spec_label; the transcript label of the `after` word
-    wins there, as on any word), and is never addressed by fix / emphasis / omit / verbatim. The whole `src` span must lie in one kept segment of the piece that holds
-    `after` (tighten protects it; an omit or a piece edge that cuts through it is an L01 FAIL)."""
+    wins there, as on any word), and is never addressed by fix / emphasis / omit / verbatim.
+    The whole `src` span must lie in one kept segment of the piece that holds `after` (tighten
+    protects it; an omit or a piece edge that cuts through it is an L01 FAIL)."""
     if not ctx.inserts:
         return words, []
     by_piece: dict = {}

@@ -135,12 +135,13 @@
   such as a restart stamped as one word; (b) a gap of 0.2 s or more between two words at speech
   level across 80% of it; (c) 0.3 s up to L19's 1.5 s of wordless sound at speech level. Each
   WARN names the source time and the words around it and prints the `hc listen` command for that
-  stretch (below), from the word before to the word after, with its edges in a pause; an
-  `insert` over it, or a `fix` on the word (for a gap or wordless sound, on the word after it),
-  settles it. An `in_offset` past a restart does not: what is left after the edge can still hold
-  more than the word's text, so the `fix` says what is heard from the edge on. (a) reads a word
-  whether or not a `false_start` or `timing_uncertain` flag marks it (the flag can name one
-  restart while the word holds more); sound L15 or L19 already reports is not repeated. On the
+  stretch (below), from the word before to the word after, its edges moved out to a pause when
+  one lies within 5 s; an `insert` over it, or a `fix` on the word (for a gap or wordless
+  sound, on the word after it), settles it. An `in_offset` past a restart does not: what is
+  left after the edge can still hold more than the word's text, so the `fix` says what is
+  heard from the edge on. (a) reads a word whether or not a `false_start` or
+  `timing_uncertain` flag marks it (the flag can name one restart while the word holds more);
+  sound L15 or L19 already reports is not repeated. On the
   same run, folded restarts, fillers and short dropouts reached the paper edit in 7 of 12 clips
   and only slice transcriptions found them: a 0.40 s "a" holding a whole second attempt at "I'm
   in a", a filler with no word in a voiced 0.26 s gap, a 0.35 s word with no token. Replayed on
